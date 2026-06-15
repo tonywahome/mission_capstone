@@ -1,0 +1,29 @@
+[
+  {
+    "email": "landowner@example.com",
+    "password": "SecurePass123!",
+    "full_name": "Jane Doe",
+    "role": "landowner",
+    "company_name": null
+  },
+  {
+    "email": "buyer@company.com",
+    "password": "SecurePass123!",
+    "full_name": "John Smith",
+    "role": "buyer",
+    "company_name": "ACME Industries",
+    "industry_sector": "Manufacturing",
+    "annual_emissions_tco2": 5000.0,
+    "energy_kwh_monthly": 60000.0,
+    "fuel_litres_monthly": 3000.0,
+    "employees": 200,
+    "offset_target_pct": 25.0
+  },
+  {
+    "email": "admin@yourorg.com",
+    "password": "AdminPass123!",
+    "full_name": "Platform Admin",
+    "role": "admin",
+    "company_name": null
+  }
+]

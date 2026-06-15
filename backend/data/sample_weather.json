@@ -1,0 +1,34 @@
+{
+  "Nyeri": {
+    "avg_temp": 18,
+    "precip_mm": 1200,
+    "drought_index": 0.2,
+    "fire_events_5yr": 1,
+    "avg_humidity": 72,
+    "rainy_months": ["Mar", "Apr", "May", "Oct", "Nov"]
+  },
+  "Laikipia": {
+    "avg_temp": 22,
+    "precip_mm": 700,
+    "drought_index": 0.6,
+    "fire_events_5yr": 4,
+    "avg_humidity": 55,
+    "rainy_months": ["Mar", "Apr", "Nov"]
+  },
+  "Murang'a": {
+    "avg_temp": 19,
+    "precip_mm": 1500,
+    "drought_index": 0.15,
+    "fire_events_5yr": 0,
+    "avg_humidity": 78,
+    "rainy_months": ["Mar", "Apr", "May", "Oct", "Nov", "Dec"]
+  },
+  "Nyandarua": {
+    "avg_temp": 14,
+    "precip_mm": 1100,
+    "drought_index": 0.25,
+    "fire_events_5yr": 2,
+    "avg_humidity": 68,
+    "rainy_months": ["Mar", "Apr", "May", "Oct", "Nov"]
+  }
+}

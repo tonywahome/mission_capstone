@@ -1,0 +1,65 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "Nyeri Forest Reserve", "area_hectares": 45.2, "land_use": "forest", "region": "Nyeri"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.945, -0.415], [36.965, -0.415], [36.967, -0.395], [36.943, -0.393], [36.945, -0.415]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Murang'a Community Land", "area_hectares": 28.7, "land_use": "agroforestry", "region": "Murang'a"},
+      "geometry": {"type": "Polygon", "coordinates": [[[37.050, -0.720], [37.070, -0.722], [37.072, -0.705], [37.048, -0.703], [37.050, -0.720]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Aberdare East Corridor", "area_hectares": 38.5, "land_use": "forest", "region": "Nyeri"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.880, -0.350], [36.910, -0.352], [36.912, -0.330], [36.878, -0.328], [36.880, -0.350]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Laikipia Grasslands", "area_hectares": 52.0, "land_use": "grassland", "region": "Laikipia"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.750, 0.150], [36.785, 0.148], [36.787, 0.175], [36.748, 0.177], [36.750, 0.150]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Nyandarua Wetlands", "area_hectares": 15.3, "land_use": "wetland", "region": "Nyandarua"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.400, -0.600], [36.415, -0.602], [36.417, -0.590], [36.398, -0.588], [36.400, -0.600]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Mt Kenya Foothills", "area_hectares": 33.8, "land_use": "forest", "region": "Nyeri"},
+      "geometry": {"type": "Polygon", "coordinates": [[[37.100, -0.200], [37.125, -0.202], [37.127, -0.180], [37.098, -0.178], [37.100, -0.200]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Karatina Agroforest", "area_hectares": 22.1, "land_use": "agroforestry", "region": "Nyeri"},
+      "geometry": {"type": "Polygon", "coordinates": [[[37.000, -0.480], [37.018, -0.482], [37.020, -0.465], [36.998, -0.463], [37.000, -0.480]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Laikipia Plateau Conservation", "area_hectares": 48.6, "land_use": "grassland", "region": "Laikipia"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.650, 0.050], [36.685, 0.048], [36.687, 0.078], [36.648, 0.080], [36.650, 0.050]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Murang'a Highlands", "area_hectares": 18.9, "land_use": "cropland", "region": "Murang'a"},
+      "geometry": {"type": "Polygon", "coordinates": [[[37.080, -0.680], [37.095, -0.682], [37.097, -0.668], [37.078, -0.666], [37.080, -0.680]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Nyandarua Ridge Forest", "area_hectares": 41.5, "land_use": "forest", "region": "Nyandarua"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.450, -0.500], [36.478, -0.502], [36.480, -0.478], [36.448, -0.476], [36.450, -0.500]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Ol Pejeta Buffer Zone", "area_hectares": 35.0, "land_use": "agroforestry", "region": "Laikipia"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.900, 0.000], [36.925, -0.002], [36.927, 0.020], [36.898, 0.022], [36.900, 0.000]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Kinangop Grassland", "area_hectares": 27.4, "land_use": "grassland", "region": "Nyandarua"},
+      "geometry": {"type": "Polygon", "coordinates": [[[36.500, -0.650], [36.520, -0.652], [36.522, -0.635], [36.498, -0.633], [36.500, -0.650]]]}
+    }
+  ]
+}
