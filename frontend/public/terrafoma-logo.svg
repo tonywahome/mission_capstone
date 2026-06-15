@@ -1,0 +1,15 @@
+<svg width="420" height="110" viewBox="0 0 420 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(8,6)">
+    <circle cx="42" cy="34" r="24" stroke="#7DE64A" stroke-width="3"/>
+    <path d="M42 60V93" stroke="#7DE64A" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M42 47L34 39" stroke="#7DE64A" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M42 39L50 32" stroke="#7DE64A" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M42 70H25C20 70 16 66 16 61C16 56 19 53 24 52C24 52 24 51 24 50C24 44 27 39 32 36" stroke="#7DE64A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <circle cx="74" cy="34" r="24" stroke="#00A85A" stroke-width="3"/>
+    <path d="M74 60V93" stroke="#00A85A" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M74 47L67 40" stroke="#00A85A" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M74 40L82 33" stroke="#00A85A" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+  <text x="218" y="61" fill="#00A85A" font-family="Verdana, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="middle" letter-spacing="4">TERRAFOMA</text>
+</svg>

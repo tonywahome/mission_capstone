@@ -4,3 +4,5 @@ __pycache__/
 .env
 *.log
 tmpclaude*/
+node_modules/
+__pycache__/
