@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+# .env.production is intentionally NOT ignored (contains only public NEXT_PUBLIC_* URLs)
+.streamlit/secrets.toml
+
+# Build
+.next/
+out/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Seed credentials – never commit real user passwords
+backend/data/users.json
+
+# ML artifacts (keep model.pkl for demo)
+*.log
+backend/backend.log
+nohup.out
+
+# Large training data files (download separately)
+backend/ml/data/gedi_congo_basin_biomass.csv
+backend/ml/data/*.csv
+
+# Jupyter
+.ipynb_checkpoints/
+backend/ml/add_baseline_column.sql
+backend/ml/gee_export_rwanda.js
+backend/create_monitoring_table.sql
+
+# Nested duplicate project copy (has its own .git + secrets)
+mission_capstone/
+.gitignore.tmp
+notebooks/tmpclaude-*
+.claude/settings.local.json

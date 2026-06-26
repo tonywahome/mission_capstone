@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "note": "Illustrative weather profiles for the capstone's two pilot districts (Bugesera, Rulindo), not sourced from a real meteorological dataset. This file is not currently read by any loader in backend/ — services/risk_scorer.py keeps its own copy of these same illustrative values inline (see WEATHER_PROFILES). Kept here, updated to match, for consistency in case a future pass wires up a file-based loader.",
+    "districts": ["Bugesera", "Rulindo"]
+  },
+  "Bugesera": {
+    "avg_temp": 21,
+    "precip_mm": 900,
+    "drought_index": 0.45,
+    "fire_events_5yr": 2,
+    "avg_humidity": 58,
+    "rainy_months": ["Mar", "Apr", "May", "Oct", "Nov"]
+  },
+  "Rulindo": {
+    "avg_temp": 18,
+    "precip_mm": 1300,
+    "drought_index": 0.15,
+    "fire_events_5yr": 0,
+    "avg_humidity": 74,
+    "rainy_months": ["Feb", "Mar", "Apr", "May", "Sep", "Oct", "Nov"]
+  }
+}
