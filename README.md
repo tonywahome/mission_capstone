@@ -10,7 +10,7 @@ TerraFoma is the software artifact for a BSc Software Engineering capstone at Af
 
 ## Project Scope
 
-This repository was re-scoped in June 2026 to align with the revised capstone research proposal. The sections below define what this academic prototype does and does not cover — read this before the rest of the document, since several features described later (carbon-credit issuance, marketplace listing, payments) are explicitly **out of scope** and exist only as preserved legacy code for a separate commercial product, TerraFoma LTD.
+This repository was re-scoped in June 2026 to align with the revised capstone research proposal. The sections below define what this academic prototype does and does not cover — read this before the rest of the document, since several features (carbon-credit issuance, marketplace listing, payments, blockchain settlement, buyer matching) are explicitly **out of scope** and have been removed from this codebase.
 
 ### In Scope
 
@@ -24,7 +24,7 @@ This repository was re-scoped in June 2026 to align with the revised capstone re
 
 ### Explicitly Out of Scope
 
-Soil organic carbon estimation, biodiversity co-benefits, a secondary carbon-credit market, blockchain settlement, automated carbon-credit issuance, buyer matching/settlement, and full registry integration (Verra/Gold Standard) are **not** part of this capstone. The original codebase included working implementations of several of these features; rather than delete them, they have been moved intact into `backend/legacy/` and `frontend/legacy/` for the separate TerraFoma LTD commercial venture. See [Legacy Code / TerraFoma LTD](#legacy-code--terrafoma-ltd) below — that code is not imported by the live application and should not be conflated with this academic prototype.
+Soil organic carbon estimation, biodiversity co-benefits, a secondary carbon-credit market, blockchain settlement, automated carbon-credit issuance, buyer matching/settlement, and full registry integration (Verra/Gold Standard) are **not** part of this capstone. The original codebase included working implementations of several of these features (a carbon-credit marketplace, pricing tiers, Polar.sh payments, certificate generation, buyer dashboards); these have been **removed** from this repository as part of the re-scope. Only the locally-calibrated AGB estimation model, the uncertainty-reporting module, and the registration/upload/verification dashboard remain.
 
 ---
 
@@ -185,7 +185,6 @@ mission_capstone/
 │   ├── models/                     # user.py, land_plot.py, risk.py
 │   ├── ml/                         # Training pipeline (see ML Pipeline section)
 │   ├── data/                       # schema.sql + migrations + sample_data.sql/.geojson
-│   ├── legacy/                     # NOT imported by main.py — see Legacy Code section
 │   └── requirements.txt
 │
 ├── frontend/
@@ -195,7 +194,6 @@ mission_capstone/
 │   │   ├── components/             # Navbar, ProtectedRoute, MapView, RiskGauge, StatsBar, CreditCard
 │   │   ├── contexts/AuthContext.tsx
 │   │   └── lib/api.ts, types.ts
-│   └── legacy/                     # NOT routed from src/app — see Legacy Code section
 │
 ├── docs/                            # ARCHITECTURE.md, SETUP.md, SUPABASE_SETUP.md, SUPABASE_QUICK_START.md
 ├── notebooks/integrity_score_training.ipynb
@@ -206,7 +204,7 @@ mission_capstone/
 
 ## API Reference (Live Endpoints)
 
-Only routers imported by `backend/main.py` are reachable; everything below is live. (Endpoints under `backend/legacy/routers/` — credits, transactions, certificates, dashboard, plots_enhanced — are **not** registered and will 404. See [Legacy Code](#legacy-code--terrafoma-ltd).)
+Only routers imported by `backend/main.py` are reachable; everything below is live. The marketplace-era endpoints (credits, transactions, certificates, dashboard, plots_enhanced) were removed in the re-scope and no longer exist.
 
 ```
 Auth            POST /api/auth/signup | login | logout
@@ -298,20 +296,17 @@ Linting: `black .` / `isort .` / `flake8 .` / `mypy .` (backend); `npm run lint`
 
 ---
 
-## Legacy Code / TerraFoma LTD
+## Removed Scope (Marketplace / Carbon-Credit Features)
 
-This academic capstone is **distinct from TerraFoma LTD**, a separate commercial venture operating in Rwanda. The original codebase included a working carbon-credit marketplace (listing, pricing tiers, Polar.sh payments, certificate generation, buyer dashboards) that is out of scope for this capstone but represents real, reusable work for that commercial product. Rather than delete it, it was moved intact, unmodified, into:
+The original codebase included a working carbon-credit marketplace (listing, pricing tiers, Polar.sh payments, certificate generation, buyer dashboards, registry views). These features are out of scope for this academic capstone and have been **removed** from the repository — the corresponding backend routers/models/services (`credits`, `transactions`, `certificates`, `dashboard`, `plots_enhanced`, `carbon_credit_engine`, `certificate_generator`) and frontend routes (`marketplace`, `registry`, `certificate`, `purchase-success`, `dashboard`, `checkout`/`confirm-payment`/`webhooks` payment APIs) no longer exist.
 
-- `backend/legacy/` — `routers/{credits,transactions,certificates,dashboard,plots_enhanced}.py`, `models/{credit,transaction}.py`, `services/{carbon_credit_engine,certificate_generator}.py`. See `backend/legacy/README.md` for the full router-by-router breakdown and re-integration notes.
-- `frontend/legacy/` — `app/{marketplace,registry,certificate/[id],purchase-success,dashboard}/`, `app/api/{checkout,confirm-payment,webhooks/polar}/`, `app/admin/dashboard/`. See `frontend/legacy/README.md`.
-
-None of this is imported by `backend/main.py` or routed from `frontend/src/app/`. The underlying Supabase tables (`carbon_credits`, `transactions`) remain in `schema.sql` unchanged — no destructive migration was run — and the live application still writes interim verification outcomes onto `carbon_credits.status` pending a dedicated `verifications` table (added as a schema-only scaffold by `migration_capstone_rescope.sql`, not yet wired up). Do not extend this legacy code as part of capstone work; do not present capstone evaluation results as validating TerraFoma LTD's commercial product, or vice versa.
+The underlying Supabase tables (`carbon_credits`, `transactions`) remain in `schema.sql` for backward compatibility — no destructive migration was run — and the live application still writes interim verification outcomes onto `carbon_credits.status` pending a dedicated `verifications` table (added as a schema-only scaffold by `migration_capstone_rescope.sql`, not yet wired up). Do not present capstone evaluation results as validating any commercial carbon-market product.
 
 ---
 
 ## Canonical Data Model (Section 3.4)
 
-The proposal's Section 3.4 class diagram defines exactly four domain entities: **Project**, **Steward**, **BiomassModel**, **Verification**. The physical schema (`schema.sql`) predates the re-scope and is organized around marketplace-era tables instead — `land_plots`, `users`, `scan_results`, `carbon_credits`/`verifications`. Renaming or collapsing those tables outright would violate this project's additive-only migration philosophy (see `migration_capstone_rescope.sql`'s header) and could break `backend/legacy/`/`frontend/legacy/` code still serving TerraFoma LTD.
+The proposal's Section 3.4 class diagram defines exactly four domain entities: **Project**, **Steward**, **BiomassModel**, **Verification**. The physical schema (`schema.sql`) predates the re-scope and is organized around marketplace-era tables instead — `land_plots`, `users`, `scan_results`, `carbon_credits`/`verifications`. Renaming or collapsing those tables outright would violate this project's additive-only migration philosophy (see `migration_capstone_rescope.sql`'s header).
 
 Instead, `backend/data/migration_canonical_entities.sql` adds four read-only SQL views named exactly after the proposal's entities, each re-projecting and renaming columns from an existing table without altering anything underneath it:
 
@@ -339,7 +334,7 @@ These views are additive and read-only: `CREATE OR REPLACE VIEW` never touches b
 
 ## Roadmap
 
-This is an academic capstone roadmap, not a commercial product roadmap — items like marketplace expansion, blockchain settlement, or registry integration are deliberately absent here; see [Legacy Code / TerraFoma LTD](#legacy-code--terrafoma-ltd) for that line of work.
+This is an academic capstone roadmap, not a commercial product roadmap — items like marketplace expansion, blockchain settlement, or registry integration are deliberately out of scope (see [Removed Scope](#removed-scope-marketplace--carbon-credit-features)).
 
 - **Field data collection** — Gather GEDI-validated field plots in Rulindo (agroforestry) to complement the existing Bugesera-weighted sample.
 - **Retrain on Bugesera + Rulindo** — Re-run `train_biomass_model.py` against the combined sample once Rulindo data is collected; supersede `biomass_model_v1.pkl`.
@@ -355,7 +350,6 @@ This is an academic capstone roadmap, not a commercial product roadmap — items
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system architecture detail
 - [docs/SETUP.md](docs/SETUP.md), [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md), [docs/SUPABASE_QUICK_START.md](docs/SUPABASE_QUICK_START.md)
-- [backend/legacy/README.md](backend/legacy/README.md), [frontend/legacy/README.md](frontend/legacy/README.md)
 - [backend/ml/README.md](backend/ml/README.md) — data collection & training pipeline
 
 ---
@@ -375,4 +369,4 @@ This is an academic capstone roadmap, not a commercial product roadmap — items
 **Wahome A. Wambugu** — BSc Software Engineering, African Leadership University, Kigali, Rwanda
 GitHub: [@tonywahome](https://github.com/tonywahome) · Email: a.wambugu@alustudent.com
 
-This project is an academic capstone submission. All rights reserved; for licensing inquiries relating to the separate TerraFoma LTD commercial product, contact the maintainer directly.
+This project is an academic capstone submission. All rights reserved; for licensing inquiries, contact the maintainer directly.
