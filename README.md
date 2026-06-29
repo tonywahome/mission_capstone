@@ -50,11 +50,11 @@ Local calibration of machine-learning biomass models against Rwandan field measu
 
 The application implements three roles per the proposal's Section 3.4 class diagram (`backend/models/user.py`, `VALID_ROLES`):
 
-| Role | Was (pre-rescope) | Responsibilities |
-|---|---|---|
-| `steward` | `landowner` | Registers plots, draws boundaries, submits field/scan data for review. |
-| `verifier_analyst` | `business` / `buyer` | Reviews submitted scans/field data via a district-scoped audit queue; confirms or flags records for the audit trail. |
-| `research_admin` | `admin` | Backend tier with exclusive access to full-precision (unrounded) coordinate data, per the Section 3.6 ethical safeguards. |
+| Role               | Was (pre-rescope)    | Responsibilities                                                                                                          |
+| ------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `steward`          | `landowner`          | Registers plots, draws boundaries, submits field/scan data for review.                                                    |
+| `verifier_analyst` | `business` / `buyer` | Reviews submitted scans/field data via a district-scoped audit queue; confirms or flags records for the audit trail.      |
+| `research_admin`   | `admin`              | Backend tier with exclusive access to full-precision (unrounded) coordinate data, per the Section 3.6 ethical safeguards. |
 
 Legacy role strings (`landowner`, `buyer`, `admin`, `business`) are still accepted at the database layer — `backend/data/migration_capstone_rescope.sql` widens the `users.role` CHECK constraint additively rather than renaming values, and `backend/routers/auth.py` transparently remaps between old and new names in both directions. This keeps any pre-existing seed data or in-flight sessions valid through the re-scope.
 
@@ -64,7 +64,7 @@ Legacy role strings (`landowner`, `buyer`, `admin`, `business`) are still accept
 
 The revised proposal's active field-validation sample is **Bugesera** (savanna/grassland) and **Rulindo** (agroforestry) — not Kigali City, which was the second district in an earlier draft of the proposal.
 
-**Important caveat on the shipped model artifact.** The trained model currently in this repository, `backend/ml/models/biomass_model_v1.pkl`, was trained and benchmarked on 1,990 samples drawn from **Bugesera and Kigali City** (see the benchmark table below) — i.e. the *pre-revision* validation geography. It has not been retrained on Rulindo data. This artifact is retained and flagged as **v1 / legacy, pending retrain** rather than deleted or relabelled, for two reasons: its benchmark numbers are real, measured results worth preserving as a baseline, and no new Rulindo field/training data has been fabricated to replace it — collecting and labelling that data is itself part of the capstone's remaining fieldwork (see [Roadmap](#roadmap)). Demo/illustrative data added elsewhere in this repository for Bugesera and Rulindo (`backend/data/sample_plots.geojson`, `backend/data/sample_data.sql`) populates the dashboard's map and audit views only — it was not used to train or validate this or any model.
+**Important caveat on the shipped model artifact.** The trained model currently in this repository, `backend/ml/models/biomass_model_v1.pkl`, was trained and benchmarked on 1,990 samples drawn from **Bugesera and Kigali City** (see the benchmark table below) — i.e. the _pre-revision_ validation geography. It has not been retrained on Rulindo data. This artifact is retained and flagged as **v1 / legacy, pending retrain** rather than deleted or relabelled, for two reasons: its benchmark numbers are real, measured results worth preserving as a baseline, and no new Rulindo field/training data has been fabricated to replace it — collecting and labelling that data is itself part of the capstone's remaining fieldwork (see [Roadmap](#roadmap)). Demo/illustrative data added elsewhere in this repository for Bugesera and Rulindo (`backend/data/sample_plots.geojson`, `backend/data/sample_data.sql`) populates the dashboard's map and audit views only — it was not used to train or validate this or any model.
 
 Everywhere the codebase needs a terrain/district prior for the two active districts (`backend/services/mock_data.py`'s `REGION_ELEVATION`) or needs to constrain which districts/land-uses count as "in scope" (`backend/models/land_plot.py`'s `IN_SCOPE_DISTRICTS = ("Bugesera", "Rulindo")` and `IN_SCOPE_LAND_USE = ("agroforestry", "grassland")`), it has been updated to reflect this. Forest, cropland, and wetland remain valid `land_use` values for backward compatibility but fall outside the active validation strata.
 
@@ -78,24 +78,24 @@ Everywhere the codebase needs a terrain/district prior for the two active distri
 
 These are the measured results behind `biomass_model_v1.pkl`, trained on **1,990 samples** (Bugesera & Kigali City, 29.5–30.9°E, 1.05–2.85°S) — see the legacy-model caveat above. Spatial blocks: 0.5° grid with GroupKFold to prevent autocorrelation inflating the score. Target: log1p(AGBD t/ha); metrics reported in original units.
 
-| Model | CV R² | CV RMSE (t/ha) | CV MAE (t/ha) | Bias (t/ha) |
-|---|---|---|---|---|
-| **XGBoost** (selected) | **0.8879 ± 0.0067** | **20.0 ± 0.5** | **16.0** | **−1.0** |
-| Random Forest | 0.8827 ± 0.0079 | 20.5 ± 0.6 | 16.3 | −1.4 |
-| SVR (RBF) | 0.8541 ± 0.0055 | 22.9 ± 0.7 | 17.9 | −3.6 |
-| CNN (MLP) | — | — | — | (PyTorch not installed at training time) |
+| Model                  | CV R²               | CV RMSE (t/ha) | CV MAE (t/ha) | Bias (t/ha)                              |
+| ---------------------- | ------------------- | -------------- | ------------- | ---------------------------------------- |
+| **XGBoost** (selected) | **0.8879 ± 0.0067** | **20.0 ± 0.5** | **16.0**      | **−1.0**                                 |
+| Random Forest          | 0.8827 ± 0.0079     | 20.5 ± 0.6     | 16.3          | −1.4                                     |
+| SVR (RBF)              | 0.8541 ± 0.0055     | 22.9 ± 0.7     | 17.9          | −3.6                                     |
+| CNN (MLP)              | —                   | —              | —             | (PyTorch not installed at training time) |
 
 Full-dataset train: R²=0.9917, RMSE=5.5 t/ha. Spatial CV (the honest, generalization-relevant figure): R²=0.8879, RMSE=20.0 t/ha. 90% prediction-interval coverage = 100% (mean PI width: 65.9 t/ha). Against the global GEDI product's 79.5% RMSE over African savannas (Naidoo et al., 2024), this is a **≥74% reduction** — exceeding the ≥40% hypothesis target, on the Bugesera/Kigali City sample. Whether this holds on Rulindo's agroforestry mosaic is an open question pending retraining.
 
 ### Top Feature Importances (Permutation)
 
-| Rank | Feature | Importance | Sensor |
-|---|---|---|---|
-| 1 | rh98 (canopy height, 98th pct) | 0.341 | GEDI LiDAR |
-| 2 | cover (canopy cover fraction) | 0.155 | GEDI LiDAR |
-| 3 | ndvi | 0.142 | Sentinel-2 |
-| 4 | savi | 0.054 | Sentinel-2 |
-| 5 | vh (SAR backscatter) | 0.041 | Sentinel-1 |
+| Rank | Feature                        | Importance | Sensor     |
+| ---- | ------------------------------ | ---------- | ---------- |
+| 1    | rh98 (canopy height, 98th pct) | 0.341      | GEDI LiDAR |
+| 2    | cover (canopy cover fraction)  | 0.155      | GEDI LiDAR |
+| 3    | ndvi                           | 0.142      | Sentinel-2 |
+| 4    | savi                           | 0.054      | Sentinel-2 |
+| 5    | vh (SAR backscatter)           | 0.041      | Sentinel-1 |
 
 ### Input Features (20 total)
 
@@ -315,12 +315,12 @@ The proposal's Section 3.4 class diagram defines exactly four domain entities: *
 
 Instead, `backend/data/migration_canonical_entities.sql` adds four read-only SQL views named exactly after the proposal's entities, each re-projecting and renaming columns from an existing table without altering anything underneath it:
 
-| Canonical view | Backing table | Notable renames |
-|---|---|---|
-| `project` | `land_plots` | `owner_id` → `steward_id` |
-| `steward` | `users` (filtered to `role IN ('steward', 'landowner')`) | — |
-| `biomass_model` | `scan_results` | `plot_id` → `project_id`, `estimated_biomass` → `agb_estimate_t_ha`, `estimated_tco2e` → `carbon_stock_tco2e`, `created_at` → `run_at`; adds `uncertainty_pct` (currently `NULL` — see [Known Limitations](#known-limitations)) |
-| `verification` | `verifications` | — (exact alias; matches the table added by `migration_capstone_rescope.sql`) |
+| Canonical view  | Backing table                                            | Notable renames                                                                                                                                                                                                                 |
+| --------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`       | `land_plots`                                             | `owner_id` → `steward_id`                                                                                                                                                                                                       |
+| `steward`       | `users` (filtered to `role IN ('steward', 'landowner')`) | —                                                                                                                                                                                                                               |
+| `biomass_model` | `scan_results`                                           | `plot_id` → `project_id`, `estimated_biomass` → `agb_estimate_t_ha`, `estimated_tco2e` → `carbon_stock_tco2e`, `created_at` → `run_at`; adds `uncertainty_pct` (currently `NULL` — see [Known Limitations](#known-limitations)) |
+| `verification`  | `verifications`                                          | — (exact alias; matches the table added by `migration_capstone_rescope.sql`)                                                                                                                                                    |
 
 These views are additive and read-only: `CREATE OR REPLACE VIEW` never touches base tables, no application code currently queries them, and they can be re-run safely. They exist so the database can be queried using the proposal's exact vocabulary (e.g. for the evaluation write-up or a future ORM layer) without a destructive rename of code that `backend/routers/*.py` already depends on.
 
@@ -345,7 +345,7 @@ This is an academic capstone roadmap, not a commercial product roadmap — items
 - **Retrain on Bugesera + Rulindo** — Re-run `train_biomass_model.py` against the combined sample once Rulindo data is collected; supersede `biomass_model_v1.pkl`.
 - **Per-stratum evaluation** — Report RMSE/bias separately for the grassland/savanna (Bugesera) and agroforestry (Rulindo) strata, per the proposal's evaluation criteria.
 - **Retention enforcement** — Implement the scheduled purge/anonymization job for `data_retention_until`.
-- **Verification entity write-path migration** — Move verification *writes* from `carbon_credits.status` onto the dedicated `verifications` table (the `verification` canonical view already exposes it for reads; see [Canonical Data Model](#canonical-data-model-section-34)).
+- **Verification entity write-path migration** — Move verification _writes_ from `carbon_credits.status` onto the dedicated `verifications` table (the `verification` canonical view already exposes it for reads; see [Canonical Data Model](#canonical-data-model-section-34)).
 - **Real per-scan uncertainty** — Extend the retrained biomass pipeline to emit a prediction interval per scan, populating `biomass_model.uncertainty_pct` (currently an honest `NULL` placeholder).
 - **Expert review** — dMRV traceability and dashboard usability review with domain experts, per the DSR evaluation plan.
 
