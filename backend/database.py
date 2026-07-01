@@ -293,9 +293,13 @@ def get_supabase_client() -> Client:
 def get_admin_client() -> Client:
     """Get admin client or fall back to in-memory database."""
     try:
-        if settings.supabase_url and settings.supabase_service_role_key and settings.supabase_url != "your-project-url":
-            client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-            logger.info("Connected to Supabase with admin privileges")
+        key = settings.supabase_service_role_key or settings.supabase_anon_key
+        if settings.supabase_url and key and settings.supabase_url != "your-project-url":
+            client = create_client(settings.supabase_url, key)
+            if settings.supabase_service_role_key:
+                logger.info("Connected to Supabase with admin privileges")
+            else:
+                logger.info("Connected to Supabase with public client fallback")
             return client
     except Exception as e:
         logger.warning(f"Supabase admin connection failed: {e}")

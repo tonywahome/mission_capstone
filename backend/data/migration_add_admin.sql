@@ -1,12 +1,12 @@
 -- Migration: Add admin role and registration requests table
 
--- Update role check to include admin
+-- Update role check to include current app roles
 ALTER TABLE users 
 DROP CONSTRAINT IF EXISTS users_role_check;
 
 ALTER TABLE users 
 ADD CONSTRAINT users_role_check 
-CHECK (role IN ('landowner', 'business', 'admin'));
+CHECK (role IN ('steward', 'verifier_analyst', 'research_admin'));
 
 -- Create registration_requests table
 CREATE TABLE IF NOT EXISTS registration_requests (
@@ -34,7 +34,7 @@ COMMENT ON TABLE registration_requests IS 'Land registration requests from lando
 COMMENT ON COLUMN registration_requests.status IS 'pending: awaiting processing, approved: scanned and issued, rejected: declined';
 COMMENT ON COLUMN registration_requests.processed_by IS 'Admin user who processed this request';
 
--- Create admin user with hashed password
+-- Create research admin user with hashed password
 -- Password: Otonto44# (SHA256 hashed)
 -- To change password later, hash your new password and run:
 -- UPDATE users SET password_hash = '<new_hashed_password>' WHERE email = 'mangamhizha@gmail.com';
@@ -43,8 +43,8 @@ VALUES (
   'mangamhizha@gmail.com',
   '0756341eb3779ee55943231d318788dad9ecb43c77f6b4ebd1d809b5dd682291', -- SHA256 hash of 'Otonto44#'
   'Admin User',
-  'admin',
+  'research_admin',
   now()
 )
 ON CONFLICT (email) DO UPDATE 
-SET role = 'admin', password_hash = '0756341eb3779ee55943231d318788dad9ecb43c77f6b4ebd1d809b5dd682291';
+SET role = 'research_admin', password_hash = '0756341eb3779ee55943231d318788dad9ecb43c77f6b4ebd1d809b5dd682291';

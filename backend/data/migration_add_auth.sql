@@ -5,13 +5,16 @@
 ALTER TABLE users 
 ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
--- Update role check to match new roles (landowner, business)
+-- Update role check to match current app roles
 ALTER TABLE users 
 DROP CONSTRAINT IF EXISTS users_role_check;
 
 ALTER TABLE users 
 ADD CONSTRAINT users_role_check 
-CHECK (role IN ('landowner', 'business', 'admin'));
+CHECK (role IN ('steward', 'verifier_analyst', 'research_admin'));
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS precise_location_consent BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Create sessions table for authentication tokens
 CREATE TABLE IF NOT EXISTS sessions (
@@ -30,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 -- Comment describing the tables
-COMMENT ON TABLE users IS 'User accounts with role-based access (landowner, business, admin)';
+COMMENT ON TABLE users IS 'User accounts with role-based access (steward, verifier_analyst, research_admin)';
 COMMENT ON TABLE sessions IS 'Active user sessions with bearer tokens';
 COMMENT ON COLUMN users.password_hash IS 'SHA256 hashed password (use bcrypt in production)';
-COMMENT ON COLUMN users.role IS 'User role: landowner (sells credits), business (buys credits), admin';
+COMMENT ON COLUMN users.role IS 'User role: steward, verifier_analyst, or research_admin';

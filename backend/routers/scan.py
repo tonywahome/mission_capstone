@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scan", tags=["scan"])
 
 
+def estimate_vegetation_cover_pct(ndvi: float, evi: float) -> float:
+    vegetation_signal = (ndvi * 0.65) + (evi * 0.35)
+    cover_pct = ((vegetation_signal - 0.15) / 0.7) * 100
+    return round(max(0.0, min(100.0, cover_pct)), 1)
+
+
 @router.post("", response_model=ScanResponse)
 async def run_scan(request: ScanRequest):
     logger.info(f"Processing scan request for owner: {request.owner_id}")
@@ -128,6 +134,7 @@ async def run_scan(request: ScanRequest):
     # Integrity score
     ndvi = features['ndvi']
     evi = features['evi']
+    vegetation_cover_pct = estimate_vegetation_cover_pct(ndvi, evi)
     integrity = calculate_integrity_score(
         ndvi_mean=ndvi,
         ndvi_std=random.uniform(0.02, 0.15),
@@ -273,6 +280,7 @@ async def run_scan(request: ScanRequest):
         plot_id=plot_id,
         mean_ndvi=ndvi,
         mean_evi=evi,
+        vegetation_cover_pct=vegetation_cover_pct,
         estimated_biomass=biomass,
         biomass_lower_90=biomass_lower,
         biomass_upper_90=biomass_upper,

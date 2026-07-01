@@ -33,11 +33,25 @@ export default function Navbar() {
     const base = [{ href: "/", label: "Home" }];
 
     if (user.role === "steward")
-      return [...base, { href: "/landowner", label: "Dashboard" }, { href: "/landowner/pending-scans", label: "My submissions" }, { href: "/request-registration", label: "Register project" }];
+      return [
+        ...base,
+        { href: "/landowner", label: "Dashboard" },
+        { href: "/scan", label: "Scan land" },
+        { href: "/landowner/pending-scans", label: "My submissions" },
+        { href: "/request-registration", label: "Register project" },
+      ];
     if (user.role === "verifier_analyst")
-      return [...base, { href: "/landowner/pending-scans", label: "Verification queue" }];
+      return [
+        ...base,
+        { href: "/landowner/pending-scans", label: "Verification queue" },
+      ];
     if (user.role === "research_admin")
-      return [...base, { href: "/admin/requests", label: "Registrations" }, { href: "/scan", label: "Scan" }, { href: "/landowner/pending-scans", label: "Audit trail" }];
+      return [
+        ...base,
+        { href: "/admin/requests", label: "Registrations" },
+        { href: "/scan", label: "Scan" },
+        { href: "/landowner/pending-scans", label: "Audit trail" },
+      ];
 
     return base;
   };
@@ -50,7 +64,8 @@ export default function Navbar() {
       : "bg-transparent"
     : "bg-white border-b border-[var(--color-border)] shadow-sm";
 
-  const linkBase = "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)]";
+  const linkBase =
+    "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)]";
 
   const linkActive = isHome
     ? scrolled
@@ -73,10 +88,11 @@ export default function Navbar() {
         />
       )}
 
-      <nav className={`top-0 z-50 w-full transition-all duration-300 ${isHome ? "fixed" : "sticky"} ${navBg}`}>
+      <nav
+        className={`top-0 z-50 w-full transition-all duration-300 ${isHome ? "fixed" : "sticky"} ${navBg}`}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2 group">
               <Image
@@ -86,9 +102,13 @@ export default function Navbar() {
                 height={100}
                 className="object-contain transition-opacity group-hover:opacity-80"
               />
-              <span className={`text-lg font-bold tracking-tight transition-colors ${
-                isHome ? "text-white drop-shadow" : "text-[var(--color-text-primary)]"
-              }`}>
+              <span
+                className={`text-lg font-bold tracking-tight transition-colors ${
+                  isHome
+                    ? "text-white drop-shadow"
+                    : "text-[var(--color-text-primary)]"
+                }`}
+              >
                 TerraFoma
               </span>
             </Link>
@@ -124,26 +144,39 @@ export default function Navbar() {
                       <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-terra-700 text-white">
                         {user.full_name.charAt(0).toUpperCase()}
                       </div>
-                      <span className="hidden sm:block">{user.full_name.split(" ")[0]}</span>
+                      <span className="hidden sm:block">
+                        {user.full_name.split(" ")[0]}
+                      </span>
                       <svg
                         className={`w-3.5 h-3.5 transition-transform duration-200 ${showUserMenu ? "rotate-180" : ""}`}
-                        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
                       </svg>
                     </button>
 
                     {showUserMenu && (
                       <div className="absolute right-0 mt-2 w-60 rounded-2xl shadow-2xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] overflow-hidden animate-scale-in">
                         <div className="px-4 py-3 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)]">
-                          <p className="text-sm font-semibold text-[var(--color-text-primary)]">{user.full_name}</p>
-                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{user.email}</p>
+                          <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                            {user.full_name}
+                          </p>
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            {user.email}
+                          </p>
                           <span className="inline-block mt-2 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-terra-700 text-white">
                             {user.role === "steward"
                               ? "Land Steward"
                               : user.role === "research_admin"
-                              ? "Research Administrator"
-                              : "Verifier / Analyst"}
+                                ? "Research Administrator"
+                                : "Verifier / Analyst"}
                           </span>
                         </div>
                         <div className="p-2">

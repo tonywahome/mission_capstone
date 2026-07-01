@@ -5,12 +5,14 @@ This guide will help you set up Supabase so your TerraFoma application uses a re
 ## Why Set Up Supabase?
 
 **Current State (In-Memory Database):**
+
 - ❌ Data is lost when server restarts
 - ❌ Only 5 hardcoded sample credits
 - ❌ No real user accounts or transactions
 - ❌ Cannot add new credits or update data
 
 **After Supabase Setup:**
+
 - ✅ Persistent data storage (survives server restarts)
 - ✅ Unlimited carbon credits
 - ✅ Real user authentication
@@ -58,9 +60,11 @@ Once your project is ready:
 ### Required Values:
 
 **Project URL:**
+
 ```
 https://xxxxxxxxxxxxx.supabase.co
 ```
+
 Copy this - you'll need it for `SUPABASE_URL`
 
 **API Keys - Find these two:**
@@ -98,9 +102,11 @@ cat backend/data/schema.sql
 ### What This Creates:
 
 The schema creates these tables:
-- **users** - User accounts (landowners, buyers, admins)
+
+- **users** - User accounts (steward, verifier_analyst, research_admin)
 - **land_plots** - Land plot information with coordinates
 - **scan_results** - Satellite scan results with biomass data
+- **sessions** - Login sessions used by the app's token auth
 - **carbon_credits** - Carbon credits with pricing and status
 - **risk_assessments** - Risk scores for each plot
 - **transactions** - Purchase history
@@ -114,6 +120,16 @@ If you prefer a visual approach, you can create tables manually:
 1. Click **"Table Editor"** in the left sidebar
 2. Click **"Create a new table"**
 3. Follow the schema in `backend/data/schema.sql` for each table
+
+### Step 4b: Apply the auth migrations
+
+After the base schema, run these files in the SQL Editor:
+
+1. `backend/data/migration_add_auth.sql`
+2. `backend/data/migration_capstone_rescope.sql`
+3. `backend/data/migration_add_admin.sql` if you want the seeded research admin account
+
+These migrations widen the role constraint for the current app roles and add the password/session fields required by signup and login.
 
 ---
 
@@ -138,6 +154,7 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...your-service-role-key-here
 ```
 
 **⚠️ Important:**
+
 - Replace `xxxxxxxxxxxxx` with your actual project URL
 - Replace the keys with your actual keys from Step 3
 - Make sure there are **no spaces** around the `=` sign
@@ -175,11 +192,13 @@ uvicorn main:app --reload --port 8002
 ```
 
 3. Look for this message:
+
    ```
    INFO:     Supabase client initialized
    ```
 
    Instead of:
+
    ```
    WARNING:  Supabase not configured, using in-memory database
    ```
@@ -194,9 +213,9 @@ You can create real carbon credits by scanning plots:
 
 1. Go to http://localhost:3001/dashboard
 2. Click on a forested area in Kenya
-3. Adjust the scan parameters
-4. Click "Scan Plot"
-5. The biomass data will be calculated and stored in Supabase!
+3. Draw a polygon on the map
+4. Click "Estimate vegetation cover"
+5. The scan result will be calculated and stored in Supabase
 
 ### Option B: Insert Sample Data via SQL
 
@@ -208,14 +227,14 @@ If you want to start with sample data in Supabase:
 ```sql
 -- Insert a sample user (landowner)
 INSERT INTO users (id, email, full_name, role, company_name)
-VALUES 
+VALUES
   ('550e8400-e29b-41d4-a716-446655440000', 'landowner@kenya.org', 'Kenya Forest Service', 'landowner', 'Kenya Forest Service');
 
 -- Insert sample land plots
 INSERT INTO land_plots (id, owner_id, name, geometry, area_hectares, region, land_use)
-VALUES 
-  ('660e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440000', 'Aberdare Forest Conservation', 
-   '{"type":"Polygon","coordinates":[[[36.7,-0.5],[36.8,-0.5],[36.8,-0.6],[36.7,-0.6],[36.7,-0.5]]]}', 
+VALUES
+  ('660e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440000', 'Aberdare Forest Conservation',
+   '{"type":"Polygon","coordinates":[[[36.7,-0.5],[36.8,-0.5],[36.8,-0.6],[36.7,-0.6],[36.7,-0.5]]]}',
    45.3, 'Nyeri County', 'forest'),
   ('660e8400-e29b-41d4-a716-446655440002', '550e8400-e29b-41d4-a716-446655440000', 'Mount Kenya Woodland',
    '{"type":"Polygon","coordinates":[[[37.3,-0.1],[37.4,-0.1],[37.4,-0.2],[37.3,-0.2],[37.3,-0.1]]]}',
@@ -223,13 +242,13 @@ VALUES
 
 -- Insert sample scan results
 INSERT INTO scan_results (id, plot_id, estimated_biomass, estimated_tco2e, integrity_score, model_version)
-VALUES 
+VALUES
   ('770e8400-e29b-41d4-a716-446655440001', '660e8400-e29b-41d4-a716-446655440001', 180.5, 12101.2, 92.4, 'rf_v1'),
   ('770e8400-e29b-41d4-a716-446655440002', '660e8400-e29b-41d4-a716-446655440002', 125.3, 6198.1, 88.1, 'rf_v1');
 
 -- Insert sample carbon credits
 INSERT INTO carbon_credits (id, scan_id, plot_id, owner_id, vintage_year, quantity_tco2e, price_per_tonne, status, integrity_score, risk_score)
-VALUES 
+VALUES
   ('880e8400-e29b-41d4-a716-446655440001', '770e8400-e29b-41d4-a716-446655440001', '660e8400-e29b-41d4-a716-446655440001',
    '550e8400-e29b-41d4-a716-446655440000', 2024, 12101.2, 29.30, 'listed', 92.4, 0.12),
   ('880e8400-e29b-41d4-a716-446655440002', '770e8400-e29b-41d4-a716-446655440002', '660e8400-e29b-41d4-a716-446655440002',
@@ -273,6 +292,7 @@ You should see credits returned from your Supabase database!
 **Problem:** Wrong API keys in `.env`
 
 **Solution:**
+
 1. Go back to Supabase → Settings → API
 2. Copy the keys again (make sure you copy the entire key)
 3. Update `.env` file
@@ -283,6 +303,7 @@ You should see credits returned from your Supabase database!
 **Problem:** Database tables haven't been created
 
 **Solution:**
+
 1. Go to Supabase SQL Editor
 2. Run the `backend/data/schema.sql` script again
 3. Check for any error messages in the SQL output
@@ -292,6 +313,7 @@ You should see credits returned from your Supabase database!
 **Problem:** Backend can't connect to Supabase
 
 **Solution:**
+
 1. Check `.env` file exists in project root
 2. Verify SUPABASE_URL starts with `https://`
 3. Verify keys are complete (start with `eyJ`)
@@ -303,6 +325,7 @@ You should see credits returned from your Supabase database!
 **Problem:** No credits in database yet
 
 **Solution:**
+
 - Either scan plots in Dashboard (recommended)
 - Or insert sample data using SQL from Step 7
 
@@ -341,6 +364,7 @@ Once Supabase is set up:
 ### Main Tables:
 
 **carbon_credits** - Your main table
+
 ```
 - id (UUID)
 - quantity_tco2e (carbon offset amount)
@@ -352,6 +376,7 @@ Once Supabase is set up:
 ```
 
 **land_plots**
+
 ```
 - id (UUID)
 - name (plot name)
@@ -361,6 +386,7 @@ Once Supabase is set up:
 ```
 
 **scan_results**
+
 ```
 - id (UUID)
 - plot_id (links to land_plots)
@@ -370,6 +396,7 @@ Once Supabase is set up:
 ```
 
 **transactions**
+
 ```
 - id (UUID)
 - credit_id (which credit was purchased)
@@ -424,6 +451,7 @@ This is more than enough for a hackathon project or small production app!
 ## Security Best Practices
 
 ### ✅ DO:
+
 - Keep `.env` file in `.gitignore`
 - Use environment variables for all secrets
 - Use `anon` key for frontend
@@ -431,6 +459,7 @@ This is more than enough for a hackathon project or small production app!
 - Enable Row-Level Security in production
 
 ### ❌ DON'T:
+
 - Commit API keys to GitHub
 - Share your `service_role` key
 - Hardcode credentials in source code
@@ -440,22 +469,23 @@ This is more than enough for a hackathon project or small production app!
 
 ## Comparing In-Memory vs Supabase
 
-| Feature | In-Memory | Supabase |
-|---------|-----------|----------|
-| **Persistence** | ❌ Lost on restart | ✅ Persistent |
-| **Data Limit** | 5 sample credits | ∞ Unlimited |
-| **Real Users** | ❌ No accounts | ✅ Full auth |
-| **Transactions** | ❌ Simulated | ✅ Real tracking |
-| **Scan & Save** | ❌ Temporary | ✅ Saved forever |
-| **API Updates** | ❌ Not possible | ✅ Full CRUD |
-| **Production Ready** | ❌ Demo only | ✅ Yes |
-| **Cost** | Free | Free (up to limits) |
+| Feature              | In-Memory          | Supabase            |
+| -------------------- | ------------------ | ------------------- |
+| **Persistence**      | ❌ Lost on restart | ✅ Persistent       |
+| **Data Limit**       | 5 sample credits   | ∞ Unlimited         |
+| **Real Users**       | ❌ No accounts     | ✅ Full auth        |
+| **Transactions**     | ❌ Simulated       | ✅ Real tracking    |
+| **Scan & Save**      | ❌ Temporary       | ✅ Saved forever    |
+| **API Updates**      | ❌ Not possible    | ✅ Full CRUD        |
+| **Production Ready** | ❌ Demo only       | ✅ Yes              |
+| **Cost**             | Free               | Free (up to limits) |
 
 ---
 
 ## Quick Reference
 
 ### Environment Variables:
+
 ```env
 SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJhbGc...
@@ -463,12 +493,14 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
 ```
 
 ### Useful Supabase URLs:
+
 - **Dashboard:** https://app.supabase.com
 - **SQL Editor:** https://app.supabase.com/project/YOUR_PROJECT/sql
 - **Table Editor:** https://app.supabase.com/project/YOUR_PROJECT/editor
 - **API Docs:** https://app.supabase.com/project/YOUR_PROJECT/api
 
 ### Backend Check:
+
 ```bash
 # See if Supabase is connected
 grep "Supabase" backend/*.log
@@ -488,6 +520,7 @@ If you run into issues:
    - Look for error messages
 
 2. **Check Backend Logs:**
+
    ```bash
    tail -f backend/backend.log
    ```

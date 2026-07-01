@@ -10,11 +10,26 @@ CREATE TABLE IF NOT EXISTS users (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   email         TEXT UNIQUE NOT NULL,
   full_name     TEXT NOT NULL,
-  role          TEXT NOT NULL CHECK (role IN ('landowner', 'buyer', 'admin')),
+  password_hash TEXT,
+  role          TEXT NOT NULL CHECK (role IN ('steward', 'verifier_analyst', 'research_admin')),
   company_name  TEXT,
+  precise_location_consent BOOLEAN NOT NULL DEFAULT FALSE,
   created_at    TIMESTAMPTZ DEFAULT now(),
   updated_at    TIMESTAMPTZ DEFAULT now()
 );
+
+-- Sessions
+CREATE TABLE IF NOT EXISTS sessions (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id       UUID REFERENCES users(id) ON DELETE CASCADE,
+  token         TEXT UNIQUE NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  expires_at    TIMESTAMPTZ DEFAULT (now() + INTERVAL '30 days')
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 -- Land Plots
 CREATE TABLE IF NOT EXISTS land_plots (

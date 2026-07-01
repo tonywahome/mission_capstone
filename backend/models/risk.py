@@ -28,6 +28,7 @@ class ScanResponse(BaseModel):
     plot_id: Optional[str] = None
     mean_ndvi: float
     mean_evi: float
+    vegetation_cover_pct: float
     estimated_biomass: float
     # Uncertainty quantification — per research proposal Section 3.3.2
     biomass_lower_90: Optional[float] = None

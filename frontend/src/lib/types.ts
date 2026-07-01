@@ -13,6 +13,7 @@ export interface ScanResult {
   plot_id: string | null;
   mean_ndvi: number;
   mean_evi: number;
+  vegetation_cover_pct: number;
   estimated_biomass: number;
   estimated_tco2e: number;
   carbon_density: number;
