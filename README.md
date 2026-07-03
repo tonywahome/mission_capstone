@@ -237,46 +237,499 @@ Monitoring      GET  /api/monitoring/plots/{plot_id}/latest | history | change-d
 
 31 endpoints across 7 routers. Interactive OpenAPI docs are auto-generated at `/docs` when the backend is running.
 
+### Recent Improvements (July 2026)
+
+**Registration API (`/api/registration/request`)**
+- Refactored request payload parsing to accept raw JSON instead of Pydantic model validation, improving flexibility for frontend-driven schema evolution.
+- Added comprehensive request validation with explicit error messages for missing required fields (`owner_name`, `owner_email`, `land_location`, `land_size`, `land_type`).
+- Enhanced logging with `exc_info=True` for improved debugging and error trace collection.
+- Simplified coordinate/boundary handling: now captures `geometry` directly from request without intermediate field mapping.
+- Improved error messaging to include the underlying exception detail, aiding frontend error handling.
+
+**Scan API (`/api/scan`)**
+- Added fault-tolerant carbon-credit creation with graceful fallback: if the full credit record fails to insert (e.g., missing optional fields), the system attempts a minimal-fields fallback rather than crashing the entire scan response.
+- Enhanced error handling on notification creation: marked as non-fatal (logs warning, not error) so a notification failure does not block the scan workflow.
+- Structured exception handling with specific error logging at each critical step (carbon-credit insert, fallback credit, notification).
+- Improved observability: detailed logging at each stage of the scan-to-credit flow for post-incident debugging.
+
+These changes improve API resilience in production by tolerating partial failures in downstream services (notifications, optional database fields) while still delivering core scan results to the frontend.
+
 ---
 
-## Getting Started
+## Installation & Setup Guide
 
-### Prerequisites
+### System Requirements
 
-Python 3.11+, Node.js 18+, a Supabase project, a Google Earth Engine account, and a Mapbox API key.
+**Required:**
+- **Python 3.11+** — Backend runtime ([download](https://www.python.org/downloads/))
+- **Node.js 18+** and **npm 9+** — Frontend build and runtime ([download](https://nodejs.org/))
+- **Git** — Version control ([download](https://git-scm.com/))
+- **PostgreSQL client** (optional but recommended) — For direct database inspection
 
-### 1. Database
+**External Accounts & Credentials (Required for Full Functionality):**
+- **Supabase account** — PostgreSQL hosting + Auth ([create at supabase.com](https://supabase.com))
+- **Google Cloud project** with Earth Engine API enabled — For satellite imagery ([setup guide](https://cloud.google.com/docs/authentication/getting-started))
+- **Mapbox account** — Map rendering and geospatial UI ([create at mapbox.com](https://mapbox.com))
 
-Run, in order: `backend/data/schema.sql`, `migration_add_auth.sql`, `migration_approval_workflow.sql`, `migration_capstone_rescope.sql` (additive-only; adds the re-scoped roles, districts, and Section 3.6 safeguard columns without touching legacy data), then `migration_canonical_entities.sql` (additive-only; adds four read-only views — `project`, `steward`, `biomass_model`, `verification` — mapping the Section 3.4 class diagram's exact entity names onto the tables above; see [Canonical Data Model](#canonical-data-model-section-34)). Optionally load `backend/data/sample_data.sql` and `sample_plots.geojson` afterward — these seed **illustrative, non-field-collected** Bugesera/Rulindo demo rows for the map and audit-trail views, not training data.
+---
 
-### 2. Backend
+### Step-by-Step Installation
+
+#### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/tonywahome/mission_capstone.git
+cd mission_capstone
+```
+
+Verify the directory structure:
+```bash
+ls -la
+# Expected: backend/, frontend/, docs/, README.md, .env, etc.
+```
+
+---
+
+#### Step 2: Set Up External Services
+
+Before running the application locally, you'll need to configure three external services: Supabase (database), Google Earth Engine (satellite data), and Mapbox (maps).
+
+**A) Supabase Setup**
+
+1. Go to [supabase.com](https://supabase.com) and create a free account
+2. Create a new project:
+   - Choose a project name (e.g., `terrafoma-capstone`)
+   - Select your preferred region (e.g., `us-east-1`)
+   - Create a strong database password
+3. Once created, go to **Settings → API** and copy:
+   - `Project URL` → `SUPABASE_URL`
+   - `anon public` → `SUPABASE_ANON_KEY`
+   - `service_role secret` → `SUPABASE_SERVICE_ROLE_KEY`
+4. Open the SQL Editor and run the database initialization scripts (in order):
+   ```sql
+   -- Run each file in sequence:
+   -- 1. backend/data/schema.sql
+   -- 2. backend/data/migration_add_auth.sql
+   -- 3. backend/data/migration_approval_workflow.sql
+   -- 4. backend/data/migration_capstone_rescope.sql
+   -- 5. backend/data/migration_canonical_entities.sql
+   -- 6. (Optional) backend/data/sample_data.sql  (for demo data)
+   ```
+   For detailed Supabase setup, see [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md)
+
+**B) Google Earth Engine Setup**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the **Earth Engine API**:
+   - Search for "Earth Engine API" in the search bar
+   - Click **Enable**
+4. Create a Service Account:
+   - Go to **Service Accounts** (under IAM & Admin)
+   - Click **Create Service Account**
+   - Fill in name and description
+   - Grant the role: **Editor** (or `roles/earthengine.admin`)
+   - Create a JSON key and download it
+5. Save the JSON file to your project:
+   ```bash
+   # Save to a secure location, e.g.:
+   mkdir -p ~/.gee-credentials
+   # Copy your downloaded JSON file there
+   ```
+
+**C) Mapbox Setup**
+
+1. Go to [mapbox.com](https://account.mapbox.com)
+2. Sign up or log in
+3. Go to **Tokens** and copy your default public token
+4. If the token doesn't exist, create one with these scopes:
+   - `maps:read`
+   - `styles:read`
+   - `datasets:read`
+
+---
+
+#### Step 3: Configure Environment Variables
+
+**Backend Configuration:**
 
 ```bash
 cd backend
-python3 -m venv ../.venv && source ../.venv/bin/activate
+cp ../.env.production.example .env
+```
+
+Edit `backend/.env` with your credentials:
+```bash
+# Supabase (from Step 2.A)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key_from_supabase
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_from_supabase
+
+# Google Earth Engine (from Step 2.B)
+EARTHENGINE_PROJECT_ID=your-gcp-project-id
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
+
+# CORS (adjust as needed for your frontend)
+CORS_ORIGINS=["http://localhost:3001"]
+
+# Optional
+API_HOST=0.0.0.0
+API_PORT=8002
+```
+
+**Frontend Configuration:**
+
+```bash
+cd frontend
+cp .env.example .env.local
+```
+
+Edit `frontend/.env.local` with your credentials:
+```bash
+# API Backend URL (local development)
+NEXT_PUBLIC_API_URL=http://localhost:8002
+
+# Mapbox (from Step 2.C)
+NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_public_token
+
+# Supabase (optional, for client-side operations)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_from_supabase
+```
+
+---
+
+#### Step 4: Set Up Python Virtual Environment
+
+```bash
+# Navigate to project root
+cd mission_capstone
+
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate it
+# On macOS/Linux:
+source .venv/bin/activate
+# On Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# On Windows Command Prompt:
+.\.venv\Scripts\activate.bat
+```
+
+Verify activation (you should see `(.venv)` prefix in your terminal):
+```bash
+python --version  # Should be 3.11+
+```
+
+---
+
+#### Step 5: Install Backend Dependencies
+
+```bash
+cd backend
+pip install --upgrade pip
 pip install -r requirements.txt
-cp ../.env.example .env   # set SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
-                          # EARTHENGINE_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS
+```
+
+Verify installation:
+```bash
+python -c "import fastapi, supabase; print('✓ Dependencies OK')"
+```
+
+---
+
+#### Step 6: Authenticate with Google Earth Engine
+
+```bash
+# Set GOOGLE_APPLICATION_CREDENTIALS to your service account JSON
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
+
+# Initialize Earth Engine (one-time setup)
 earthengine authenticate
+
+# Verify connection
+python -c "import ee; ee.Initialize(); print('✓ Earth Engine OK')"
+```
+
+---
+
+#### Step 7: Start the Backend Server
+
+```bash
+cd backend
 uvicorn main:app --reload --port 8002
 ```
 
-Backend: `http://localhost:8002` · API docs: `http://localhost:8002/docs`
+**Expected output:**
+```
+INFO:     Uvicorn running on http://0.0.0.0:8002
+INFO:     Application startup complete
+```
 
-### 3. Frontend
+**Access:**
+- API: `http://localhost:8002`
+- Interactive API Docs: `http://localhost:8002/docs`
+- ReDoc (alternative docs): `http://localhost:8002/redoc`
+
+---
+
+#### Step 8: Install Frontend Dependencies
+
+In a **new terminal**:
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local   # set NEXT_PUBLIC_API_URL, NEXT_PUBLIC_MAPBOX_TOKEN
+```
+
+Verify installation:
+```bash
+npm list react  # Should show React 18.3+
+```
+
+---
+
+#### Step 9: Start the Frontend Server
+
+```bash
+cd frontend
 npm run dev
 ```
 
-Frontend: `http://localhost:3001`
+**Expected output:**
+```
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3001
+```
 
-### Test Accounts
+**Access:**
+- Frontend: `http://localhost:3001`
 
-`sample_data.sql` seeds one illustrative steward profile (`steward.pilot@terrafoma-capstone.local`) to populate dashboard views, but it has no usable password — `backend/routers/auth.py` only mints a `password_hash` through the `/api/auth/signup` flow, and the seed `INSERT` doesn't set one. To exercise the live workflow, sign up through the frontend's `/signup` page with role `steward`, `verifier_analyst`, or `research_admin`; legacy role strings (`landowner`, `business`, `admin`) are also accepted and remapped automatically.
+---
+
+### Verification Checklist
+
+Run this checklist to ensure everything is working:
+
+- [ ] **Backend API**: `curl http://localhost:8002/docs` returns OpenAPI docs
+- [ ] **Frontend**: `http://localhost:3001` loads the landing page
+- [ ] **Database**: Backend can query Supabase (check console for no errors)
+- [ ] **Earth Engine**: Backend can initialize EE API (check for `Earth Engine OK` message)
+- [ ] **Maps**: Frontend map component loads without errors (F12 → Console)
+
+---
+
+### Creating Test Accounts
+
+1. Open `http://localhost:3001/signup` in your browser
+2. Fill in the form:
+   - **Email**: any email (doesn't need to be real for local testing)
+   - **Password**: any secure password
+   - **Role**: Choose `steward`, `verifier_analyst`, or `research_admin`
+   - **District**: `Bugesera` or `Rulindo`
+3. Click **Sign Up**
+4. You're now logged in! Explore the dashboard:
+   - **Steward**: Register plots and upload scans
+   - **Verifier/Analyst**: Review submissions in the verification queue
+   - **Research Admin**: Access full-precision data and system settings
+
+**Pre-seeded Demo Data:**
+
+If you loaded `backend/data/sample_data.sql` in Supabase, a demo steward profile exists:
+- **Email**: `steward.pilot@terrafoma-capstone.local`
+- **Password**: Set your own via `/signup` (seed data has no password)
+- **Role**: `steward`
+- **Sample plots**: Pre-drawn plots in Bugesera and Rulindo appear on the map
+
+---
+
+### Project Directory Structure
+
+**Key files and directories:**
+
+```
+mission_capstone/
+│
+├── .env                              # Root environment variables (shared config)
+├── .env.example                      # Template (do not edit)
+├── README.md                         # This file
+│
+├── backend/                          # FastAPI backend
+│   ├── main.py                       # Entry point; registers all routers
+│   ├── config.py                     # Configuration and settings
+│   ├── database.py                   # Supabase client initialization
+│   ├── requirements.txt              # Python dependencies
+│   ├── .env                          # Backend environment variables (override root .env)
+│   ├── .env.production.example       # Template for production
+│   │
+│   ├── routers/                      # API endpoint handlers
+│   │   ├── auth.py                   # User signup, login, session management
+│   │   ├── registration.py           # Land plot registration requests
+│   │   ├── scan.py                   # AI satellite scan trigger & lookup
+│   │   ├── landowner.py              # User dashboard (pending scans, credits)
+│   │   ├── notifications.py          # Notification system
+│   │   ├── plots.py                  # Plot CRUD operations
+│   │   └── monitoring.py             # Health checks and monitoring
+│   │
+│   ├── services/                     # Business logic and external integrations
+│   │   ├── biomass_estimator.py      # ML model inference
+│   │   ├── carbon_calculator.py      # Carbon credit calculation
+│   │   ├── gee_feature_extractor.py  # Sentinel-1/2, GEDI data extraction
+│   │   ├── gee_biomass_baseline.py   # GEDI L4B baseline reference
+│   │   ├── risk_scorer.py            # Risk assessment for scans
+│   │   ├── location_service.py       # Geospatial utilities
+│   │   ├── privacy.py                # Section 3.6 ethical safeguards
+│   │   ├── mock_data.py              # Demo data generation
+│   │   └── experiment_tracker.py     # ML experiment logging
+│   │
+│   ├── models/                       # Data models (Pydantic schemas)
+│   │   ├── user.py                   # User, role definitions
+│   │   ├── land_plot.py              # Land plot schema
+│   │   └── risk.py                   # Risk model schema
+│   │
+│   ├── ml/                           # Machine learning pipeline
+│   │   ├── train_biomass_model.py    # Model training script
+│   │   ├── models/
+│   │   │   └── biomass_model_v1.pkl  # Trained XGBoost model (artifact)
+│   │   ├── collect_sentinel_data.py  # Data collection from Sentinel
+│   │   ├── collect_gedi_data.py      # GEDI LiDAR data collection
+│   │   └── gee_export_rwanda.py      # Earth Engine Rwanda export
+│   │
+│   ├── data/                         # Database schemas and migrations
+│   │   ├── schema.sql                # Main database schema
+│   │   ├── migration_*.sql           # Incremental migrations
+│   │   ├── sample_data.sql           # Demo user/plot data
+│   │   └── sample_plots.geojson      # GeoJSON sample plots
+│   │
+│   └── templates/                    # Email templates, etc.
+│
+├── frontend/                         # Next.js frontend
+│   ├── package.json                  # Node.js dependencies
+│   ├── next.config.js                # Next.js configuration
+│   ├── tsconfig.json                 # TypeScript configuration
+│   ├── .env.local                    # Frontend environment variables (local)
+│   ├── .env.example                  # Template for .env.local
+│   ├── Dockerfile                    # Container image definition
+│   ├── railway.json                  # Railway.app deployment config
+│   │
+│   ├── src/
+│   │   ├── app/                      # Next.js 14 App Router
+│   │   │   ├── page.tsx              # Landing page
+│   │   │   ├── login/                # Login page
+│   │   │   ├── signup/               # User signup
+│   │   │   ├── request-registration/ # Plot registration request form
+│   │   │   ├── scan/                 # Satellite scan trigger
+│   │   │   ├── landowner/            # User dashboard
+│   │   │   │   ├── page.tsx          # Landowner home
+│   │   │   │   ├── pending-scans/    # Pending scans list
+│   │   │   │   └── monitoring/       # Monitoring dashboard
+│   │   │   ├── admin/                # Admin pages
+│   │   │   └── layout.tsx            # Root layout
+│   │   │
+│   │   ├── components/               # Reusable React components
+│   │   │   ├── Navbar.tsx            # Navigation bar
+│   │   │   ├── MapView.tsx           # Mapbox GL map
+│   │   │   ├── ProtectedRoute.tsx    # Auth-protected route wrapper
+│   │   │   ├── RiskGauge.tsx         # Risk visualization
+│   │   │   ├── StatsBar.tsx          # Statistics display
+│   │   │   └── CreditCard.tsx        # Carbon credit card
+│   │   │
+│   │   ├── contexts/
+│   │   │   └── AuthContext.tsx       # Global auth state
+│   │   │
+│   │   └── lib/
+│   │       ├── api.ts                # Backend API client
+│   │       ├── types.ts              # TypeScript type definitions
+│   │       └── utils.ts              # Utility functions
+│   │
+│   └── public/                       # Static assets (images, icons)
+│
+├── docs/                             # Project documentation
+│   ├── SETUP.md                      # Detailed setup instructions
+│   ├── ARCHITECTURE.md               # System architecture
+│   ├── SUPABASE_SETUP.md             # Database-specific setup
+│   └── SUPABASE_QUICK_START.md       # Quick Supabase guide
+│
+├── notebooks/                        # Jupyter notebooks (analysis, training)
+│   └── integrity_score_training.ipynb
+│
+├── datasets/                         # Sample datasets and GeoJSON files
+│
+├── scripts/                          # Utility scripts
+│
+└── render.yaml                       # Render.com deployment config
+```
+
+---
+
+### Common Tasks
+
+**Run Backend in Production Mode:**
+```bash
+cd backend
+gunicorn main:app -k uvicorn.workers.UvicornWorker -w 4 --bind 0.0.0.0:8002
+```
+
+**Build Frontend for Production:**
+```bash
+cd frontend
+npm run build
+npm start
+```
+
+**Run Backend Tests (if available):**
+```bash
+cd backend
+pytest tests/
+```
+
+**Format Code:**
+```bash
+# Backend
+cd backend
+black .
+isort .
+
+# Frontend
+cd frontend
+npm run lint
+```
+
+**View Database Directly:**
+```bash
+# Using psql (requires PostgreSQL client)
+psql postgresql://postgres:password@db.your-project.supabase.co:5432/postgres
+```
+
+**Check API Health:**
+```bash
+curl -s http://localhost:8002/docs | grep -q "FastAPI" && echo "✓ Backend OK" || echo "✗ Backend Down"
+```
+
+---
+
+### Troubleshooting
+
+**Issue: "ModuleNotFoundError: No module named 'fastapi'"**
+- Solution: Ensure virtual environment is activated and `pip install -r requirements.txt` completed
+
+**Issue: "SUPABASE_URL is not set"**
+- Solution: Check `.env` file exists in backend directory with correct credentials
+
+**Issue: "Earth Engine authentication failed"**
+- Solution: Re-run `earthengine authenticate` and verify `GOOGLE_APPLICATION_CREDENTIALS` path is correct
+
+**Issue: Frontend can't reach backend API**
+- Solution: Verify `NEXT_PUBLIC_API_URL=http://localhost:8002` in `frontend/.env.local` and backend is running
+
+**Issue: "Mapbox token invalid"**
+- Solution: Regenerate token from [mapbox.com/tokens](https://account.mapbox.com/access-tokens/) and update `NEXT_PUBLIC_MAPBOX_TOKEN`
+
+**Issue: "Connection refused" on Supabase**
+- Solution: Verify internet connection and that Supabase project is active (check at supabase.com/projects)
+
+For more help, check [docs/SETUP.md](docs/SETUP.md) or [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md)
 
 ---
 
