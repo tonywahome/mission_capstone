@@ -27,6 +27,7 @@ function ScanPageContent() {
     type: "success" | "error";
     msg: string;
   } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const vegetationCoverPct = scanResult?.vegetation_cover_pct ?? 0;
 
@@ -210,10 +211,10 @@ function ScanPageContent() {
       if (ownerInfo && resolvedOwnerId !== "demo-user") {
         showToast(
           "success",
-          `Scan complete. Notification sent to ${ownerInfo.name} to review and approve.`,
+          `Scan complete. Click "Submit for Review" to proceed.`,
         );
       } else {
-        showToast("success", "Scan complete.");
+        showToast("success", "Scan complete. Click \"Submit for Review\" to proceed.");
       }
     } catch (err: any) {
       console.error("Scan failed:", err);
@@ -224,6 +225,53 @@ function ScanPageContent() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSubmitForReview = async () => {
+    if (!scanResult) return;
+    setSubmitting(true);
+
+    try {
+      const payload = {
+        scan_id: scanResult.scan_id,
+        plot_id: scanResult.plot_id,
+        owner_id: resolvedOwnerId,
+        tco2e: scanResult.estimated_tco2e,
+        integrity_score: scanResult.integrity_score,
+        risk_score: scanResult.risk_adjustment,
+      };
+
+      console.log("Submitting scan for review with payload:", payload);
+
+      const response = await fetch("/api/scan/submit-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const responseData = await response.json();
+      console.log("Response status:", response.status, "Data:", responseData);
+
+      if (!response.ok) {
+        throw new Error(
+          responseData.detail ||
+            responseData.message ||
+            "Failed to submit scan for review"
+        );
+      }
+
+      showToast("success", "Scan submitted for verifier review!");
+      setScanResult(null);
+      setDrawnGeometry(null);
+      if (draw.current) {
+        draw.current.deleteAll();
+      }
+    } catch (err: any) {
+      console.error("Submit failed:", err);
+      showToast("error", err.message || "Failed to submit scan for review");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -447,6 +495,22 @@ function ScanPageContent() {
                     />
                   </div>
 
+                  {/* Action buttons */}
+                  <button
+                    onClick={handleSubmitForReview}
+                    disabled={submitting}
+                    className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    {submitting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Submitting…
+                      </>
+                    ) : (
+                      "✓ Submit for Review"
+                    )}
+                  </button>
+
                   {/* Next steps */}
                   <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-xl p-4">
                     <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-3">
@@ -454,31 +518,15 @@ function ScanPageContent() {
                     </p>
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center gap-2 text-emerald-600">
-                        <span>✓</span> Scan saved to database
+                        <span>✓</span> Scan completed
                       </div>
-                      <div
-                        className={`flex items-center gap-2 ${resolvedOwnerId !== "demo-user" ? "text-emerald-600" : "text-amber-600"}`}
-                      >
-                        <span>
-                          {resolvedOwnerId !== "demo-user" ? "✓" : "⚠"}
-                        </span>
-                        {resolvedOwnerId !== "demo-user"
-                          ? "In-app notification sent to landowner"
-                          : "Notification sent to demo account (owner ID unresolved)"}
+                      <div className="flex items-center gap-2 text-amber-600">
+                        <span>⏳</span> Awaiting submission for review
                       </div>
                       <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
-                        <span>⏳</span> Awaiting landowner approval
+                        <span>⏳</span> Verifier review (after submission)
                       </div>
                     </div>
-                    {ownerInfo && resolvedOwnerId !== "demo-user" && (
-                      <div className="mt-3 pt-3 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
-                        <strong className="text-[var(--color-text-secondary)]">
-                          {ownerInfo.name}
-                        </strong>{" "}
-                        will review results under <em>Pending scans</em> in
-                        their dashboard.
-                      </div>
-                    )}
                   </div>
 
                   {/* Re-scan button */}

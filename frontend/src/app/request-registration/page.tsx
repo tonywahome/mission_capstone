@@ -159,7 +159,6 @@ function RequestRegistrationContent() {
           body: JSON.stringify({
             owner_name: user?.full_name,
             owner_email: user?.email,
-            owner_id: user?.id,
             land_location: formData.landLocation,
             land_size: formData.landSize,
             land_type: formData.landType,

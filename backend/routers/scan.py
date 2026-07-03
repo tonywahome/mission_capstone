@@ -71,8 +71,9 @@ async def run_scan(request: ScanRequest):
             elif "bugesera" in location.lower():
                 inferred_land_use = "grassland"
 
+            new_plot_id = str(uuid.uuid4())
             new_plot = {
-                "id": str(uuid.uuid4()),
+                "id": new_plot_id,
                 "owner_id": owner_id,
                 "name": f"Plot at {location}",
                 "geometry": request.geometry,
@@ -80,10 +81,18 @@ async def run_scan(request: ScanRequest):
                 "region": location,
                 "land_use": inferred_land_use
             }
-            result = db.table("land_plots").insert(new_plot).execute()
-            plot = result.data[0]
-            plot_id = plot["id"]
-            logger.info(f"Created new plot {plot_id} at {location}")
+            try:
+                result = db.table("land_plots").insert(new_plot).execute()
+                if result.data:
+                    plot = result.data[0]
+                    plot_id = plot["id"]
+                    logger.info(f"Created new plot {plot_id} at {location}")
+                else:
+                    plot_id = new_plot_id
+                    logger.warning(f"Failed to insert plot but assigning generated ID {plot_id}")
+            except Exception as plot_insert_err:
+                plot_id = new_plot_id
+                logger.warning(f"Failed to insert plot to database: {plot_insert_err}, using generated ID {plot_id}")
             
     except Exception as e:
         # Database not configured, use defaults
@@ -338,6 +347,97 @@ async def run_scan(request: ScanRequest):
         raw_bands=raw_bands,
         sensors_used=scan_record["sensors_used"],
     )
+
+
+@router.post("/submit-review")
+async def submit_scan_for_review(data: dict):
+    """Submit a completed scan for verifier review."""
+    try:
+        scan_id = data.get("scan_id")
+        plot_id = data.get("plot_id")
+        owner_id = data.get("owner_id")
+        tco2e = data.get("tco2e")
+        integrity_score = data.get("integrity_score")
+        risk_score = data.get("risk_score")
+
+        logger.info(f"submit-review received: scan_id={scan_id}, plot_id={plot_id}, owner_id={owner_id}")
+
+        if not scan_id:
+            logger.error("Missing scan_id in submit-review request")
+            raise HTTPException(status_code=400, detail="scan_id required")
+
+        if not plot_id:
+            logger.warning(f"plot_id is None for scan {scan_id}, attempting to fetch from scan_results")
+            db = get_supabase_client()
+            result = db.table("scan_results").select("plot_id").eq("id", scan_id).execute()
+            if result.data:
+                plot_id = result.data[0].get("plot_id")
+                logger.info(f"Fetched plot_id from scan_results: {plot_id}")
+
+            if not plot_id:
+                plot_id = str(uuid.uuid4())
+                logger.warning(f"Could not determine plot_id for scan {scan_id}, generating fallback ID: {plot_id}")
+
+        db = get_supabase_client()
+        admin_db = get_admin_client()
+
+        logger.info(f"Scan {scan_id} submitted for review")
+
+        # Create a verification record for the verifier/analyst to review
+        verification_id = str(uuid.uuid4())
+        verification_record = {
+            "id": verification_id,
+            "scan_id": scan_id,
+            "plot_id": plot_id,
+            "owner_id": owner_id,
+            "status": "pending_verification",
+            "tco2e": tco2e,
+            "integrity_score": integrity_score,
+            "risk_score": risk_score,
+            "created_at": datetime.now().isoformat(),
+        }
+        try:
+            admin_db.table("verifications").insert(verification_record).execute()
+            logger.info(f"Created verification record {verification_id} for scan {scan_id}")
+        except Exception as verify_err:
+            logger.warning(f"Failed to create verification record (non-fatal): {verify_err}")
+
+        # Notify verifier/analyst that there's a scan awaiting review
+        notification_data = {
+            "user_id": "verifier-group",  # Notify all verifiers
+            "type": "scan_pending_verification",
+            "title": "New Scan Awaiting Verification",
+            "message": f"A new scan (ID: {scan_id[:8]}) has been submitted for verification. Estimated tCO2e: {tco2e:.2f}",
+            "data": {
+                "scan_id": scan_id,
+                "verification_id": verification_id,
+                "plot_id": plot_id,
+                "owner_id": owner_id,
+                "tco2e": tco2e,
+                "integrity_score": integrity_score,
+                "risk_score": risk_score,
+            }
+        }
+        try:
+            admin_db.table("notifications").insert(notification_data).execute()
+            logger.info(f"Created notification for verifiers about scan {scan_id}")
+        except Exception as notif_err:
+            logger.warning(f"Failed to create notification (non-fatal): {notif_err}")
+
+        return {
+            "message": "Scan submitted for review successfully",
+            "scan_id": scan_id,
+            "verification_id": verification_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to submit scan for review: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit scan for review: {str(e)}"
+        )
 
 
 def send_scan_completion_email(
