@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 import logging
+import json
 from datetime import datetime
 from database import get_admin_client
 
@@ -24,42 +25,45 @@ class RegistrationRequest(BaseModel):
     additional_info: Optional[str] = None
 
 @router.post("/request")
-async def submit_registration_request(data: RegistrationRequest, background_tasks: BackgroundTasks):
+async def submit_registration_request(request: Request, background_tasks: BackgroundTasks):
     """Submit a land registration request. Admin will be notified via email."""
     try:
+        # Parse JSON body
+        data = await request.json()
+
+        # Extract fields from request
+        owner_name = data.get("owner_name")
+        owner_email = data.get("owner_email")
+        land_location = data.get("land_location")
+        land_size = data.get("land_size")
+        land_type = data.get("land_type")
+        additional_info = data.get("additional_info")
+        geometry = data.get("geometry")
+
+        # Validate required fields
+        if not all([owner_name, owner_email, land_location, land_size, land_type]):
+            raise HTTPException(status_code=400, detail="Missing required fields: owner_name, owner_email, land_location, land_size, land_type")
+
         db = get_admin_client()
-        
-        # Prepare coordinates and boundaries for storage
-        coords_json = None
-        if data.coordinates:
-            coords_json = {"lat": data.coordinates.lat, "lon": data.coordinates.lon}
-        
-        boundaries_json = None
-        if data.boundaries:
-            boundaries_json = data.boundaries
-        
-        geometry_json = None
-        if data.geometry:
-            geometry_json = data.geometry
         
         # Store request in database
         request_data = {
-            "owner_name": data.owner_name,
-            "owner_email": data.owner_email,
-            "land_location": data.land_location,
-            "land_size": data.land_size,
-            "land_type": data.land_type,
-            "coordinates": coords_json,
-            "boundaries": boundaries_json,
-            "geometry": geometry_json,
-            "additional_info": data.additional_info,
+            "owner_name": owner_name,
+            "owner_email": owner_email,
+            "land_location": land_location,
+            "land_size": land_size,
+            "land_type": land_type,
+            "geometry": geometry,
+            "additional_info": additional_info,
             "status": "pending",
-            "created_at": datetime.now().isoformat(),
         }
         
+        logger.info(f"Inserting registration request: {request_data}")
         result = db.table("registration_requests").insert(request_data).execute()
-        
+        logger.info(f"Insert result: {result}")
+
         if not result.data:
+            logger.error(f"No data returned from insert: {result}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to submit registration request"
@@ -68,15 +72,15 @@ async def submit_registration_request(data: RegistrationRequest, background_task
         # Send email notification to admin (in background)
         background_tasks.add_task(
             send_admin_notification,
-            data.owner_name,
-            data.owner_email,
-            data.land_location,
-            data.land_size,
-            data.land_type,
-            data.additional_info
+            owner_name,
+            owner_email,
+            land_location,
+            land_size,
+            land_type,
+            additional_info
         )
         
-        logger.info(f"Registration request submitted by {data.owner_name} ({data.owner_email}) with coordinates")
+        logger.info(f"Registration request submitted by {owner_name} ({owner_email})")
         
         return {
             "message": "Registration request submitted successfully",
@@ -86,10 +90,10 @@ async def submit_registration_request(data: RegistrationRequest, background_task
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Registration request error: {e}")
+        logger.error(f"Registration request error: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="Failed to submit registration request"
+            detail=f"Failed to submit registration request: {str(e)}"
         )
 
 def send_admin_notification(

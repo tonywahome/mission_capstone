@@ -246,8 +246,25 @@ async def run_scan(request: ScanRequest):
             "integrity_score": integrity,
             "risk_score": risk["composite_risk"],  # Keep as 0-1 decimal, not percentage
         }
-        db.table("carbon_credits").insert(credit_record).execute()
-        logger.info(f"Created carbon credit {credit_id} with pending_approval status")
+        try:
+            db.table("carbon_credits").insert(credit_record).execute()
+            logger.info(f"Created carbon credit {credit_id} with pending_approval status")
+        except Exception as credit_err:
+            logger.error(f"Failed to create carbon credit {credit_id}: {credit_err}")
+            # Create a fallback record with minimal fields
+            try:
+                fallback_credit = {
+                    "id": credit_id,
+                    "scan_id": scan_id,
+                    "plot_id": plot_id,
+                    "owner_id": owner_id,
+                    "quantity_tco2e": tco2e,
+                    "status": "pending_approval",
+                }
+                db.table("carbon_credits").insert(fallback_credit).execute()
+                logger.info(f"Created fallback carbon credit {credit_id}")
+            except Exception as fallback_err:
+                logger.error(f"Failed to create fallback carbon credit: {fallback_err}")
         
         # Audit trail — required for dMRV transparency (proposal Section 3.3)
         try:
@@ -297,8 +314,11 @@ async def run_scan(request: ScanRequest):
         }
         # Use admin client to bypass RLS for notification creation
         admin_db = get_admin_client()
-        admin_db.table("notifications").insert(notification_data).execute()
-        logger.info(f"Created notification for landowner {owner_id}")
+        try:
+            admin_db.table("notifications").insert(notification_data).execute()
+            logger.info(f"Created notification for landowner {owner_id}")
+        except Exception as notif_err:
+            logger.warning(f"Failed to create notification (non-fatal): {notif_err}")
 
         # Update registration request if provided
         if registration_request_id:
