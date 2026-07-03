@@ -21,6 +21,7 @@ class ScanRequest(BaseModel):
     plot_id: Optional[str] = None
     geometry: Optional[dict] = None  # GeoJSON Polygon
     owner_id: str
+    registration_request_id: Optional[str] = None  # Link to registration request
 
 
 class ScanResponse(BaseModel):

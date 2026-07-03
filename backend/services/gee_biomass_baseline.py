@@ -16,6 +16,11 @@ Falls back to an elevation-based Rwanda forest estimate when GEE is unavailable.
 import logging
 from typing import Dict, Optional
 
+try:
+    import ee
+except ImportError:
+    ee = None
+
 logger = logging.getLogger(__name__)
 
 from services.gee_init import initialize_gee

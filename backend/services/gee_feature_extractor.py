@@ -16,6 +16,11 @@ import random
 from typing import Dict, Optional
 
 try:
+    import ee
+except ImportError:
+    ee = None
+
+try:
     import numpy as np
     _NP_AVAILABLE = True
 except ImportError:
@@ -128,10 +133,6 @@ def _extract_sar_features(ee_geometry, region, start_date: str, end_date: str) -
             .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
             .select(["VV", "VH"])
         )
-        count = s1.size().getInfo()
-        if count == 0:
-            logger.warning("No Sentinel-1 images found for this geometry/date range")
-            return {}
         composite = s1.median()
         vals = composite.reduceRegion(
             reducer=ee.Reducer.mean(),
@@ -139,6 +140,8 @@ def _extract_sar_features(ee_geometry, region, start_date: str, end_date: str) -
             scale=10,
             maxPixels=1e9,
         ).getInfo()
+        if not vals:
+            return {}
         vv = vals.get("VV")
         vh = vals.get("VH")
         if vv is None or vh is None:
@@ -151,35 +154,29 @@ def _extract_sar_features(ee_geometry, region, start_date: str, end_date: str) -
 
 def _extract_gedi_features(ee_geometry, region) -> Dict:
     """
-    Extract GEDI L4A above-ground biomass density and canopy metrics via GEE.
-    Returns empty dict if no data available over the region.
+    Extract GEDI canopy height and cover fraction via GEE.
+    Gets height metrics from GEDI L2A (GEDI02_A_002_MONTHLY) and cover fraction
+    from GEDI L2B (GEDI02_B_002_MONTHLY) combined in a single reduceRegion call.
     """
     try:
-        gedi = (
-            ee.ImageCollection("LARSE/GEDI/GEDI04_A_002_MONTHLY")
-            .filterBounds(ee_geometry)
-            .select(["agbd", "elev_lowestmode"])
-        )
-        count = gedi.size().getInfo()
-        if count == 0:
-            logger.warning("No GEDI L4A data found for this geometry")
-            return {}
-        composite = gedi.mean()
-        vals = composite.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=region,
-            scale=25,
-            maxPixels=1e9,
-        ).getInfo()
-
         # GEDI canopy height from L2A product
         gedi_l2a = (
             ee.ImageCollection("LARSE/GEDI/GEDI02_A_002_MONTHLY")
             .filterBounds(ee_geometry)
-            .select(["rh50", "rh75", "rh98", "cover"])
+            .select(["rh50", "rh75", "rh98"])
+            .mean()
         )
-        height_composite = gedi_l2a.mean()
-        height_vals = height_composite.reduceRegion(
+        # GEDI canopy cover from L2B product
+        gedi_l2b = (
+            ee.ImageCollection("LARSE/GEDI/GEDI02_B_002_MONTHLY")
+            .filterBounds(ee_geometry)
+            .select(["cover"])
+            .mean()
+        )
+        # Combine the bands into one image
+        composite = gedi_l2a.addBands(gedi_l2b)
+        
+        height_vals = composite.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=region,
             scale=25,
@@ -187,9 +184,10 @@ def _extract_gedi_features(ee_geometry, region) -> Dict:
         ).getInfo()
 
         out = {}
-        for k in ["rh50", "rh75", "rh98", "cover"]:
-            if height_vals.get(k) is not None:
-                out[k] = height_vals[k]
+        if height_vals:
+            for k in ["rh50", "rh75", "rh98", "cover"]:
+                if height_vals.get(k) is not None:
+                    out[k] = height_vals[k]
         return out
     except Exception as e:
         logger.warning(f"GEDI extraction failed: {e}")
@@ -211,6 +209,7 @@ def extract_sentinel_features(
 
     Falls back to synthetic mock features when GEE is unavailable.
     """
+    print(f"[DEBUG] extract_sentinel_features called. _GEE_AVAILABLE={_GEE_AVAILABLE}, geometry={geometry}")
     if not _GEE_AVAILABLE:
         logger.info("GEE unavailable — returning synthetic mock features")
         return _mock_features(geometry)
@@ -310,6 +309,9 @@ def extract_sentinel_features(
         return features
 
     except Exception as e:
+        import traceback
+        print("[DEBUG] Error extracting features exception:")
+        traceback.print_exc()
         logger.error(f"Error extracting features: {e}")
         return None
 

@@ -106,7 +106,7 @@ def send_admin_notification(
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         
-        admin_email = "mangamhizha@gmail.com"
+        admin_email = "antonomics101@gmail.com"
         
         # Create email message
         subject = f"New Land Registration Request from {owner_name}"

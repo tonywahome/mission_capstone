@@ -14,7 +14,6 @@
 
 export default function StatsBar({ glassy = false }: { glassy?: boolean }) {
   const items = [
-    { label: "Validation districts", value: "Bugesera · Rulindo", icon: "📍" },
     { label: "Sensors fused", value: "S1 · S2 · GEDI", icon: "🛰️" },
     { label: "Target RMSE reduction", value: "≥ 40%", icon: "📉" },
     { label: "Roles", value: "Steward · Analyst · Admin", icon: "🛡️" },
@@ -26,7 +25,7 @@ export default function StatsBar({ glassy = false }: { glassy?: boolean }) {
       : "bg-terra-800 text-white py-5"
     }>
       <div className="max-w-7xl mx-auto px-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-0 md:divide-x md:divide-white/10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-0 md:divide-x md:divide-white/10">
           {items.map((item, i) => (
             <div key={item.label} className={`text-center px-4 ${i > 0 ? "md:border-l-0" : ""}`}>
               <div className="text-2xl font-bold tracking-tight">{item.value}</div>

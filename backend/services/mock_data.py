@@ -6,6 +6,7 @@ BAND_PROFILES = {
     "grassland": {"B2": 0.05, "B3": 0.08, "B4": 0.06, "B8": 0.28, "B11": 0.22, "B12": 0.15},
     "cropland": {"B2": 0.06, "B3": 0.09, "B4": 0.07, "B8": 0.25, "B11": 0.20, "B12": 0.14},
     "wetland": {"B2": 0.04, "B3": 0.06, "B4": 0.04, "B8": 0.32, "B11": 0.25, "B12": 0.18},
+    "bareland": {"B2": 0.10, "B3": 0.12, "B4": 0.10, "B8": 0.12, "B11": 0.18, "B12": 0.14},
 }
 
 # Capstone re-scope: the field-validation sample covers Bugesera (savanna/

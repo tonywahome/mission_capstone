@@ -24,6 +24,7 @@ def estimate_vegetation_cover_pct(ndvi: float, evi: float) -> float:
 @router.post("", response_model=ScanResponse)
 async def run_scan(request: ScanRequest):
     logger.info(f"Processing scan request for owner: {request.owner_id}")
+    registration_request_id = request.registration_request_id
     
     # Convert "demo-user" string to proper UUID
     DEMO_USER_UUID = "00000000-0000-0000-0000-000000000001"
@@ -195,8 +196,26 @@ async def run_scan(request: ScanRequest):
     }
     try:
         db = get_supabase_client()
-        db.table("scan_results").insert(scan_record).execute()
-        logger.info(f"Saved scan result {scan_id} to database")
+        try:
+            db.table("scan_results").insert(scan_record).execute()
+            logger.info(f"Saved scan result {scan_id} to database")
+        except Exception as insert_err:
+            logger.warning(f"Failed to save scan to DB with all fields: {insert_err}")
+            # Try fallback by removing fields not in the original schema
+            fallback_record = {
+                "id": scan_record["id"],
+                "plot_id": scan_record["plot_id"],
+                "mean_ndvi": scan_record["mean_ndvi"],
+                "mean_evi": scan_record["mean_evi"],
+                "estimated_biomass": scan_record["estimated_biomass"],
+                "estimated_tco2e": scan_record["estimated_tco2e"],
+                "carbon_density": scan_record["carbon_density"],
+                "integrity_score": scan_record["integrity_score"],
+                "model_version": scan_record["model_version"],
+                "raw_bands": scan_record["raw_bands"],
+            }
+            db.table("scan_results").insert(fallback_record).execute()
+            logger.info(f"Saved scan result {scan_id} using fallback schema")
         
         # Create an interim verification record from the scan result, status
         # 'pending_approval' (awaiting Verifier-Analyst review). This still
@@ -271,6 +290,32 @@ async def run_scan(request: ScanRequest):
         admin_db = get_admin_client()
         admin_db.table("notifications").insert(notification_data).execute()
         logger.info(f"Created notification for landowner {owner_id}")
+
+        # Update registration request if provided
+        if registration_request_id:
+            try:
+                admin_db.table("registration_requests").update({
+                    "status": "approved",
+                    "processed_at": datetime.now().isoformat(),
+                }).eq("id", registration_request_id).execute()
+                logger.info(f"Updated registration request {registration_request_id} to approved status")
+
+                # Send email notification to admin about completed scan
+                reg_request = admin_db.table("registration_requests").select("*").eq("id", registration_request_id).execute()
+                if reg_request.data:
+                    req_data = reg_request.data[0]
+                    send_scan_completion_email(
+                        owner_name=req_data.get("owner_name"),
+                        owner_email=req_data.get("owner_email"),
+                        land_location=req_data.get("land_location"),
+                        land_size=req_data.get("land_size"),
+                        biomass=biomass,
+                        tco2e=tco2e,
+                        integrity=integrity,
+                        scan_id=scan_id
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to update registration request: {e}")
         
     except Exception as e:
         logger.warning(f"Failed to save scan to DB: {e}")
@@ -293,6 +338,60 @@ async def run_scan(request: ScanRequest):
         raw_bands=raw_bands,
         sensors_used=scan_record["sensors_used"],
     )
+
+
+def send_scan_completion_email(
+    owner_name: str,
+    owner_email: str,
+    land_location: str,
+    land_size: str,
+    biomass: float,
+    tco2e: float,
+    integrity: float,
+    scan_id: str
+):
+    """Send email notification to admin about completed scan."""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        admin_email = "antonomics101@gmail.com"
+
+        subject = f"Land Scan Complete: {owner_name}'s Property at {land_location}"
+
+        body = f"""
+Scan Completed Successfully
+
+Landowner Details:
+- Name: {owner_name}
+- Email: {owner_email}
+
+Land Details:
+- Location: {land_location}
+- Size: {land_size} hectares
+
+Scan Results:
+- Scan ID: {scan_id}
+- Above-Ground Biomass: {biomass:.2f} t/ha
+- Carbon Stock (tCO2e): {tco2e:.2f}
+- Integrity Score: {integrity:.0f}/100
+
+The scan results have been saved and are awaiting verifier review.
+
+---
+TerraFoma Carbon Credit Platform
+        """
+
+        logger.info(f"EMAIL TO ADMIN: {admin_email}")
+        logger.info(f"Subject: {subject}")
+        logger.info(f"Body: {body}")
+
+        # TODO: Configure SMTP to actually send emails
+        # For production, configure with Gmail SMTP or SendGrid
+
+    except Exception as e:
+        logger.error(f"Failed to send scan completion email: {e}")
 
 
 @router.get("/{scan_id}")

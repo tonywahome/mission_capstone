@@ -17,9 +17,18 @@ function RequestRegistrationContent() {
   const [formData, setFormData] = useState({
     landLocation: "",
     landSize: "",
-    landType: "forest",
+    landType: "grassland",
     additionalInfo: "",
   });
+
+  const landTypes = [
+    { value: "grassland", label: "Grassland / Savanna", description: "Open grassland, savanna, or pasture" },
+    { value: "agroforestry", label: "Agroforestry", description: "Trees integrated with crops or livestock" },
+    { value: "bareland", label: "Bareland", description: "Degraded or bare soil with minimal vegetation" },
+    { value: "cropland", label: "Cropland", description: "Agricultural cropland or cultivated fields" },
+    { value: "forest", label: "Forest", description: "Dense forest or woodland" },
+    { value: "wetland", label: "Wetland", description: "Wetland, marsh, or water-related ecosystem" },
+  ];
   const [drawnGeometry, setDrawnGeometry] = useState<any>(null);
   const [area, setArea] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -168,7 +177,7 @@ function RequestRegistrationContent() {
       setFormData({
         landLocation: "",
         landSize: "",
-        landType: "forest",
+        landType: "grassland",
         additionalInfo: "",
       });
       setDrawnGeometry(null);
@@ -226,7 +235,7 @@ function RequestRegistrationContent() {
               </h2>
               <p className="text-gray-600 mb-6 max-w-md mx-auto">
                 Your land registration request has been sent to our admin team
-                at <strong>mangamhizha@gmail.com</strong>. They will scan your
+                at <strong>antonomics101@gmail.com</strong>. They will scan your
                 land and contact you with the results.
               </p>
               <button
@@ -349,20 +358,26 @@ function RequestRegistrationContent() {
                 >
                   Land Type <span className="text-red-500">*</span>
                 </label>
-                <select
-                  id="landType"
-                  value={formData.landType}
-                  onChange={(e) =>
-                    setFormData({ ...formData, landType: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-terra-500 focus:border-transparent"
-                >
-                  <option value="forest">Forest</option>
-                  <option value="grassland">Grassland</option>
-                  <option value="cropland">Cropland</option>
-                  <option value="wetland">Wetland</option>
-                  <option value="agroforestry">Agroforestry</option>
-                </select>
+                <div className="space-y-3">
+                  <select
+                    id="landType"
+                    value={formData.landType}
+                    onChange={(e) =>
+                      setFormData({ ...formData, landType: e.target.value })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-terra-500 focus:border-transparent"
+                  >
+                    {landTypes.map((type) => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                  {/* Description of selected land type */}
+                  <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                    {landTypes.find(t => t.value === formData.landType)?.description}
+                  </div>
+                </div>
               </div>
 
               {/* Additional Info */}
@@ -437,10 +452,10 @@ function RequestRegistrationContent() {
           <p>
             Questions? Contact our admin team at{" "}
             <a
-              href="mailto:mangamhizha@gmail.com"
+              href="mailto:antonomics101@gmail.com"
               className="text-terra-600 hover:text-terra-700 font-medium"
             >
-              mangamhizha@gmail.com
+              antonomics101@gmail.com
             </a>
           </p>
         </div>
