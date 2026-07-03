@@ -4,7 +4,7 @@
 
 TerraFoma is the software artifact for a BSc Software Engineering capstone at African Leadership University. It fuses Sentinel-1 radar, Sentinel-2 multispectral imagery, and NASA GEDI spaceborne LiDAR into a locally-calibrated machine-learning model for above-ground biomass (AGB) estimation, paired with an uncertainty-reporting module and a lightweight dashboard for project registration, field-data upload, and audit-trail visualization.
 
-> **Author:** Wahome A. Wambugu | **Supervisor:** Emmanuel Adjei | **Institution:** African Leadership University, Kigali, Rwanda | **Repository:** [github.com/tonywahome/mission_capstone](https://github.com/tonywahome/mission_capstone)
+> **Author:** Wahome A. Wambugu | **Supervisor:** Emmanuel Adjei | **Institution:** African Leadership University, Kigali, Rwanda | **Video Demo:** [Final Version Video Demo](https://drive.google.com/file/d/1-XVYOEI7cy3BKUBAbhRiM0s8h4sGGYag/view?usp=sharing)
 
 ---
 
