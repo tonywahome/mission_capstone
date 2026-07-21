@@ -21,8 +21,12 @@ async function fetchAPI<T>(
 
 export const api = {
   // Scan
-  runScan: (data: { plot_id?: string; geometry?: object; owner_id: string }) =>
-    fetchAPI("/api/scan", { method: "POST", body: JSON.stringify(data) }),
+  runScan: (data: {
+    plot_id?: string;
+    geometry?: object;
+    owner_id: string;
+    registration_request_id?: string;
+  }) => fetchAPI("/api/scan", { method: "POST", body: JSON.stringify(data) }),
 
   getScan: (scanId: string) => fetchAPI(`/api/scan/${scanId}`),
 
@@ -91,4 +95,16 @@ export const api = {
     }),
   getMyCredits: (userId: string) =>
     fetchAPI(`/api/landowner/my-credits?user_id=${userId}`),
+
+  // Registration requests (admin review)
+  approveRegistrationRequest: (requestId: string, reviewerId?: string) =>
+    fetchAPI(`/api/registration/requests/${requestId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ reviewer_id: reviewerId }),
+    }),
+  rejectRegistrationRequest: (requestId: string, reviewerId?: string, rejectionReason?: string) =>
+    fetchAPI(`/api/registration/requests/${requestId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reviewer_id: reviewerId, rejection_reason: rejectionReason }),
+    }),
 };

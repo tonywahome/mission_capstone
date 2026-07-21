@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 import logging
 import json
+import uuid
 from datetime import datetime
 from database import get_admin_client
 
@@ -32,6 +33,7 @@ async def submit_registration_request(request: Request, background_tasks: Backgr
         data = await request.json()
 
         # Extract fields from request
+        owner_id = data.get("owner_id")
         owner_name = data.get("owner_name")
         owner_email = data.get("owner_email")
         land_location = data.get("land_location")
@@ -68,7 +70,58 @@ async def submit_registration_request(request: Request, background_tasks: Backgr
                 status_code=500,
                 detail="Failed to submit registration request"
             )
-        
+
+        request_id = result.data[0]["id"]
+
+        # Immediately create a plot so it shows up on the steward's dashboard
+        # ("Registered plots" tally reads land_plots, not registration_requests
+        # — see frontend/src/app/landowner/page.tsx). The admin scan flow
+        # (backend/routers/scan.py) later enriches this same row with the
+        # real area/land_use derived from satellite imagery rather than
+        # creating a second plot; it looks the row up by registration_request_id.
+        if owner_id:
+            try:
+                parsed_size = float(land_size)
+            except (TypeError, ValueError):
+                parsed_size = 0.0
+
+            # land_plots.land_use has a narrower CHECK constraint than
+            # registration_requests.land_type (schema.sql omits 'bareland',
+            # which migration_add_admin.sql allows on the request form) —
+            # fall back to 'grassland' rather than violate the constraint.
+            plot_land_use = land_type if land_type in (
+                "forest", "grassland", "cropland", "wetland", "agroforestry"
+            ) else "grassland"
+
+            plot_data = {
+                "id": str(uuid.uuid4()),
+                "owner_id": owner_id,
+                "name": f"Plot at {land_location}",
+                "geometry": geometry or {},
+                "area_hectares": parsed_size,
+                "region": land_location,
+                "land_use": plot_land_use,
+                "registration_request_id": request_id,
+                "status": "pending_scan",
+            }
+            try:
+                plot_result = db.table("land_plots").insert(plot_data).execute()
+                logger.info(f"Created plot for registration request {request_id}: {plot_result.data}")
+            except Exception as plot_err:
+                # Older schemas may not have registration_request_id/status yet
+                # (see backend/data/migration_plot_registration_link.sql) —
+                # retry without those columns so the plot still appears on the
+                # dashboard even if that migration hasn't been applied.
+                logger.warning(f"Plot insert failed with full schema, retrying without new columns: {plot_err}")
+                try:
+                    fallback_plot = {k: v for k, v in plot_data.items() if k not in ("registration_request_id", "status")}
+                    db.table("land_plots").insert(fallback_plot).execute()
+                    logger.info(f"Created plot for registration request {request_id} using fallback schema")
+                except Exception as fallback_err:
+                    logger.error(f"Failed to create plot for registration request {request_id}: {fallback_err}")
+        else:
+            logger.warning(f"No owner_id provided with registration request {request_id}; skipping plot creation")
+
         # Send email notification to admin (in background)
         background_tasks.add_task(
             send_admin_notification,
@@ -84,7 +137,7 @@ async def submit_registration_request(request: Request, background_tasks: Backgr
         
         return {
             "message": "Registration request submitted successfully",
-            "request_id": result.data[0]["id"]
+            "request_id": request_id
         }
         
     except HTTPException:
@@ -153,19 +206,150 @@ async def get_registration_requests(status: Optional[str] = None):
     """Get all registration requests (admin only)."""
     try:
         db = get_admin_client()
-        
+
         query = db.table("registration_requests").select("*")
-        
+
         if status:
             query = query.eq("status", status)
-        
+
         result = query.order("created_at", desc=True).execute()
-        
+
         return result.data
-        
+
     except Exception as e:
         logger.error(f"Failed to fetch registration requests: {e}")
         raise HTTPException(
             status_code=500,
             detail="Failed to fetch registration requests"
         )
+
+
+class ReviewRequest(BaseModel):
+    reviewer_id: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+
+@router.post("/requests/{request_id}/approve")
+async def approve_registration_request(request_id: str, body: ReviewRequest):
+    """
+    Admin greenlights a pending registration request for scanning.
+
+    This does NOT run the satellite scan itself — the plot created at
+    submission time (see submit_registration_request above) already exists
+    on the steward's dashboard with status 'pending_scan'. Approving here
+    just marks the request reviewed/accepted so it moves out of the
+    "pending" filter; a research_admin still runs "Auto Scan" afterward to
+    populate real biomass/NDVI data (backend/routers/scan.py sets the plot
+    to 'scanned' and the request to 'approved' again at that point — both
+    writes are idempotent, so doing it here first is safe).
+    """
+    db = get_admin_client()
+
+    existing = db.table("registration_requests").select("*").eq("id", request_id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Registration request not found")
+
+    current = existing.data[0]
+    if current["status"] != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request is not pending (current status: {current['status']})"
+        )
+
+    update_data = {
+        "status": "approved",
+        "processed_at": datetime.now().isoformat(),
+    }
+    if body.reviewer_id:
+        update_data["processed_by"] = body.reviewer_id
+
+    try:
+        db.table("registration_requests").update(update_data).eq("id", request_id).execute()
+    except Exception as e:
+        logger.error(f"Failed to approve registration request {request_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to approve registration request")
+
+    _notify_steward_of_review(db, current, approved=True)
+
+    logger.info(f"Registration request {request_id} approved")
+    return {"message": "Registration request approved", "request_id": request_id, "status": "approved"}
+
+
+@router.post("/requests/{request_id}/reject")
+async def reject_registration_request(request_id: str, body: ReviewRequest):
+    """Admin declines a pending registration request. The plot created at
+    submission time is removed so it no longer shows on the steward's
+    dashboard (it never had a real scan/credit attached, since only pending
+    requests can be rejected — see the status check below)."""
+    db = get_admin_client()
+
+    existing = db.table("registration_requests").select("*").eq("id", request_id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Registration request not found")
+
+    current = existing.data[0]
+    if current["status"] != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request is not pending (current status: {current['status']})"
+        )
+
+    update_data = {
+        "status": "rejected",
+        "processed_at": datetime.now().isoformat(),
+        "rejection_reason": body.rejection_reason,
+    }
+    if body.reviewer_id:
+        update_data["processed_by"] = body.reviewer_id
+
+    try:
+        db.table("registration_requests").update(update_data).eq("id", request_id).execute()
+    except Exception as e:
+        logger.error(f"Failed to reject registration request {request_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reject registration request")
+
+    # Remove the plot created at submission time — it was never scanned
+    # (status is still 'pending' at this point, guaranteed by the check
+    # above), so nothing else references it yet.
+    try:
+        db.table("land_plots").delete().eq("registration_request_id", request_id).execute()
+    except Exception as e:
+        logger.warning(f"Failed to remove plot for rejected request {request_id} (non-fatal): {e}")
+
+    _notify_steward_of_review(db, current, approved=False, rejection_reason=body.rejection_reason)
+
+    logger.info(f"Registration request {request_id} rejected")
+    return {"message": "Registration request rejected", "request_id": request_id, "status": "rejected"}
+
+
+def _notify_steward_of_review(db, request_row: dict, approved: bool, rejection_reason: Optional[str] = None):
+    """Best-effort notification to the steward who submitted the request.
+    Looked up by owner_email since registration_requests doesn't store the
+    steward's user id directly (see submit_registration_request docstring
+    context — owner_id is only used for the land_plots row, not persisted
+    on the request itself)."""
+    try:
+        owner_email = request_row.get("owner_email")
+        if not owner_email:
+            return
+        user_res = db.table("users").select("id").eq("email", owner_email).execute()
+        if not user_res.data:
+            return
+        user_id = user_res.data[0]["id"]
+
+        notification_data = {
+            "user_id": user_id,
+            "type": "system",
+            "title": "Registration Approved" if approved else "Registration Rejected",
+            "message": (
+                f"Your land registration request for {request_row.get('land_location')} was approved. "
+                "It's now queued for satellite scanning."
+                if approved
+                else f"Your land registration request for {request_row.get('land_location')} was rejected."
+                + (f" Reason: {rejection_reason}" if rejection_reason else "")
+            ),
+            "data": {"request_id": request_row.get("id")},
+        }
+        db.table("notifications").insert(notification_data).execute()
+    except Exception as e:
+        logger.warning(f"Failed to send review notification (non-fatal): {e}")

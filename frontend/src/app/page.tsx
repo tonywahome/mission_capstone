@@ -56,7 +56,7 @@ export default function Home() {
                     Go to monitoring desk
                   </Link>
                 ) : user?.role === "research_admin" ? (
-                  <Link href="/admin/dashboard" className="rounded-xl bg-white text-terra-800 px-7 py-3.5 text-sm font-bold hover:bg-terra-50 shadow-xl hover:-translate-y-0.5 transition-all">
+                  <Link href="/admin/requests" className="rounded-xl bg-white text-terra-800 px-7 py-3.5 text-sm font-bold hover:bg-terra-50 shadow-xl hover:-translate-y-0.5 transition-all">
                     Open admin console
                   </Link>
                 ) : (

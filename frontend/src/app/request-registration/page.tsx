@@ -157,6 +157,7 @@ function RequestRegistrationContent() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            owner_id: user?.id,
             owner_name: user?.full_name,
             owner_email: user?.email,
             land_location: formData.landLocation,
@@ -169,7 +170,8 @@ function RequestRegistrationContent() {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to submit request");
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.detail || "Failed to submit request");
       }
 
       setSuccess(true);

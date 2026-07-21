@@ -2,15 +2,15 @@
 Train the TerraFoma biomass estimation model.
 
 Architecture (per research proposal Section 3.3.3):
-- Multi-model benchmark: Random Forest, XGBoost, SVR, CNN — select best by spatial CV RMSE
+- Multi-model benchmark: Random Forest, XGBoost, SVR — select best by spatial CV RMSE
 - log1p target transform — biomass is log-normal, reduces RMSE significantly
 - Spatial block cross-validation — guards against autocorrelation, honest generalisation
 - Multi-sensor features: Sentinel-1 SAR (vv/vh), Sentinel-2 spectral, GEDI LiDAR (rh50/98)
-- Uncertainty quantification via prediction intervals (ensemble spread or quantile model)
+- Uncertainty quantification via prediction intervals (ensemble spread)
 - SHAP feature importance — explainable for carbon standard auditors
 
 Usage:
-    pip install xgboost scikit-learn pandas numpy joblib torch
+    pip install xgboost scikit-learn pandas numpy joblib
     python train_biomass_model.py
 """
 
@@ -33,14 +33,6 @@ except ImportError:
     from sklearn.ensemble import GradientBoostingRegressor
     _XGB_AVAILABLE = False
     logging.warning("xgboost not installed — falling back to sklearn GBR. Install: pip install xgboost")
-
-try:
-    import torch
-    import torch.nn as nn
-    _TORCH_AVAILABLE = True
-except ImportError:
-    _TORCH_AVAILABLE = False
-    logging.warning("PyTorch not installed — CNN model will be skipped. Install: pip install torch")
 
 # Section 3.7 (experiment tracking) — see services/experiment_tracker.py.
 # This script is run standalone with cwd=backend/ml/ (per the Usage note
@@ -151,23 +143,6 @@ def spatial_block_cv(df: pd.DataFrame, block_size_deg: float = 0.5) -> pd.Series
     return blocks
 
 
-class BiomassCNN(nn.Module if _TORCH_AVAILABLE else object):
-    """Simple MLP/CNN for tabular feature stacks (per proposal Table 4)."""
-    def __init__(self, n_features: int):
-        if not _TORCH_AVAILABLE:
-            return
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(n_features, 128), nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(128, 64),         nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(64, 32),          nn.ReLU(),
-            nn.Linear(32, 1),
-        )
-
-    def forward(self, x):
-        return self.net(x).squeeze(-1)
-
-
 def train_random_forest(X_train, y_train_log):
     model = RandomForestRegressor(
         n_estimators=300, max_depth=None, min_samples_leaf=2,
@@ -213,50 +188,9 @@ def train_svr(X_train, y_train_log):
     return model
 
 
-def train_cnn(X_train, y_train_log, X_val, y_val_log, n_epochs: int = 50):
-    if not _TORCH_AVAILABLE:
-        return None
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    n_features = X_train.shape[1]
-    model = BiomassNN(n_features).to(device)
-    optimiser = torch.optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.MSELoss()
-
-    X_tr = torch.tensor(X_train, dtype=torch.float32).to(device)
-    y_tr = torch.tensor(y_train_log, dtype=torch.float32).to(device)
-    X_v  = torch.tensor(X_val, dtype=torch.float32).to(device)
-    y_v  = torch.tensor(y_val_log, dtype=torch.float32).to(device)
-
-    best_val_loss = float("inf")
-    best_state = None
-    for epoch in range(n_epochs):
-        model.train()
-        optimiser.zero_grad()
-        pred = model(X_tr)
-        loss = loss_fn(pred, y_tr)
-        loss.backward()
-        optimiser.step()
-
-        model.eval()
-        with torch.no_grad():
-            val_loss = loss_fn(model(X_v), y_v).item()
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-
-    if best_state:
-        model.load_state_dict(best_state)
-    model.to("cpu")
-    return model
-
-
-def evaluate(model, X, y_true, scaler, label: str, is_torch: bool = False) -> dict:
+def evaluate(model, X, y_true, scaler, label: str) -> dict:
     X_scaled = scaler.transform(X)
-    if is_torch and _TORCH_AVAILABLE:
-        with torch.no_grad():
-            y_pred_log = model(torch.tensor(X_scaled, dtype=torch.float32)).numpy()
-    else:
-        y_pred_log = model.predict(X_scaled)
+    y_pred_log = model.predict(X_scaled)
     y_pred = np.expm1(y_pred_log)
     r2   = r2_score(y_true, y_pred)
     mae  = mean_absolute_error(y_true, y_pred)
@@ -266,7 +200,7 @@ def evaluate(model, X, y_true, scaler, label: str, is_torch: bool = False) -> di
     return {"r2": r2, "mae": mae, "rmse": rmse, "bias": bias}
 
 
-def _cv_metrics(model, X_df, y_log, blocks, n_folds: int, is_torch: bool = False) -> dict:
+def _cv_metrics(model_fn, X_df, y_log, blocks, n_folds: int) -> dict:
     """Run spatial block CV for a given model factory and return mean metrics."""
     gkf = GroupKFold(n_splits=n_folds)
     fold_results = []
@@ -279,16 +213,8 @@ def _cv_metrics(model, X_df, y_log, blocks, n_folds: int, is_torch: bool = False
         X_tr_s  = sc.fit_transform(X_tr)
         X_val_s = sc.transform(X_val)
 
-        if is_torch and _TORCH_AVAILABLE:
-            m = train_cnn(X_tr_s, y_tr, X_val_s, y_log.iloc[val_idx].values)
-        else:
-            m = model(X_tr_s, y_tr)
-
-        if is_torch and _TORCH_AVAILABLE:
-            with torch.no_grad():
-                y_pred_log = m(torch.tensor(X_val_s, dtype=torch.float32)).numpy()
-        else:
-            y_pred_log = m.predict(X_val_s)
+        m = model_fn(X_tr_s, y_tr)
+        y_pred_log = m.predict(X_val_s)
         y_pred = np.expm1(y_pred_log)
         fold_results.append({
             "r2":   r2_score(y_val_true_orig, y_pred),

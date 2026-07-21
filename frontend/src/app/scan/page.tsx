@@ -23,6 +23,9 @@ function ScanPageContent() {
   const [ownerInfo, setOwnerInfo] = useState<any>(null);
   // resolved once on map load — persists even after localStorage is cleared
   const [resolvedOwnerId, setResolvedOwnerId] = useState<string>("demo-user");
+  const [registrationRequestId, setRegistrationRequestId] = useState<
+    string | null
+  >(null);
   const [toast, setToast] = useState<{
     type: "success" | "error";
     msg: string;
@@ -117,6 +120,11 @@ function ScanPageContent() {
             }
           }
 
+          const storedRequestId = localStorage.getItem("scanRequestId");
+          if (storedRequestId) {
+            setRegistrationRequestId(storedRequestId);
+          }
+
           if (storedOwnerStr) {
             try {
               const info = JSON.parse(storedOwnerStr);
@@ -204,6 +212,7 @@ function ScanPageContent() {
       const result = (await api.runScan({
         geometry: drawnGeometry,
         owner_id: resolvedOwnerId,
+        registration_request_id: registrationRequestId ?? undefined,
       })) as ScanResult;
 
       setScanResult(result);
@@ -311,7 +320,6 @@ function ScanPageContent() {
               scan to estimate vegetation cover and carbon stock.
             </p>
           </div>
-          "🛰️ Estimate vegetation cover"
           {ownerInfo && (
             <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded-xl p-4 mb-5">
               <div className="flex items-center gap-2 mb-2">

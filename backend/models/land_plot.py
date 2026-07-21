@@ -23,6 +23,8 @@ class LandPlotCreate(BaseModel):
     region: Optional[str] = None
     district: Optional[str] = None  # e.g. "Bugesera" or "Rulindo"
     land_use: str = "grassland"
+    registration_request_id: Optional[str] = None
+    status: Optional[str] = None  # 'pending_scan' | 'scanned' — see migration_plot_registration_link.sql
 
 
 class LandPlotResponse(BaseModel):
@@ -34,4 +36,6 @@ class LandPlotResponse(BaseModel):
     region: Optional[str] = None
     district: Optional[str] = None
     land_use: str
+    registration_request_id: Optional[str] = None
+    status: Optional[str] = None
     created_at: Optional[str] = None

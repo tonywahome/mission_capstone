@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 
 interface RegistrationRequest {
   id: string;
@@ -21,11 +23,46 @@ interface RegistrationRequest {
 }
 
 export default function AdminRegistrationsPage() {
+  const { user } = useAuth();
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [selectedRequest, setSelectedRequest] = useState<RegistrationRequest | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  const applyReviewResult = (requestId: string, status: "approved" | "rejected") => {
+    setRequests(prev => prev.map(r => (r.id === requestId ? { ...r, status } : r)));
+    setSelectedRequest(prev => (prev && prev.id === requestId ? { ...prev, status } : prev));
+  };
+
+  const handleApprove = async (request: RegistrationRequest) => {
+    setReviewingId(request.id);
+    setReviewError(null);
+    try {
+      await api.approveRegistrationRequest(request.id, user?.id);
+      applyReviewResult(request.id, "approved");
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Failed to approve request");
+    } finally {
+      setReviewingId(null);
+    }
+  };
+
+  const handleReject = async (request: RegistrationRequest) => {
+    const reason = window.prompt("Reason for rejecting this request (optional):") ?? undefined;
+    setReviewingId(request.id);
+    setReviewError(null);
+    try {
+      await api.rejectRegistrationRequest(request.id, user?.id, reason);
+      applyReviewResult(request.id, "rejected");
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Failed to reject request");
+    } finally {
+      setReviewingId(null);
+    }
+  };
 
   const handleScanWithGeometry = (request: RegistrationRequest) => {
     if (request.geometry) {
@@ -170,6 +207,19 @@ export default function AdminRegistrationsPage() {
             </div>
           )}
 
+          {/* Review error (from inline Approve/Reject) */}
+          {reviewError && !selectedRequest && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center justify-between">
+              <p className="text-red-800 font-medium">{reviewError}</p>
+              <button
+                onClick={() => setReviewError(null)}
+                className="text-sm text-red-600 hover:text-red-700 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Error State */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
@@ -279,6 +329,20 @@ export default function AdminRegistrationsPage() {
                                       🛰️ Manual Scan
                                     </Link>
                                   )}
+                                  <button
+                                    onClick={() => handleApprove(request)}
+                                    disabled={reviewingId === request.id}
+                                    className="text-green-600 hover:text-green-700 font-medium disabled:opacity-50"
+                                  >
+                                    ✓ Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleReject(request)}
+                                    disabled={reviewingId === request.id}
+                                    className="text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
+                                  >
+                                    ✗ Reject
+                                  </button>
                                 </>
                               )}
                             </td>
@@ -399,6 +463,12 @@ export default function AdminRegistrationsPage() {
                   </div>
                 </div>
 
+                {reviewError && (
+                  <div className="mt-4 bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">
+                    {reviewError}
+                  </div>
+                )}
+
                 <div className="mt-6 flex justify-between">
                   <div>
                     {selectedRequest.status === "pending" && (
@@ -427,27 +497,23 @@ export default function AdminRegistrationsPage() {
                     {selectedRequest.status === "pending" && (
                       <>
                         <button
-                          onClick={() => {
-                            // TODO: Implement approve functionality
-                            alert("Approve functionality coming soon");
-                          }}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          onClick={() => handleApprove(selectedRequest)}
+                          disabled={reviewingId === selectedRequest.id}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
                         >
-                          ✓ Approve
+                          {reviewingId === selectedRequest.id ? "…" : "✓ Approve"}
                         </button>
                         <button
-                          onClick={() => {
-                            // TODO: Implement reject functionality
-                            alert("Reject functionality coming soon");
-                          }}
-                          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                          onClick={() => handleReject(selectedRequest)}
+                          disabled={reviewingId === selectedRequest.id}
+                          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
                         >
-                          ✗ Reject
+                          {reviewingId === selectedRequest.id ? "…" : "✗ Reject"}
                         </button>
                       </>
                     )}
                     <button
-                      onClick={() => setSelectedRequest(null)}
+                      onClick={() => { setSelectedRequest(null); setReviewError(null); }}
                       className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
                     >
                       Close

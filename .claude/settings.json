@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"stephenwahome@gmail.com\",\"password\":\"TempPass123!\"}')",
+      "Bash(python3 -c \"import psycopg2; print\\('psycopg2 ok'\\)\")",
+      "Bash(python3 -c \"import asyncpg; print\\('asyncpg ok'\\)\")",
+      "Bash(python3 -c ' *)"
+    ]
+  }
+}

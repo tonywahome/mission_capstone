@@ -52,24 +52,66 @@ async def run_scan(request: ScanRequest):
                     db.table("land_plots").update({"region": location}).eq("id", request.plot_id).execute()
                     logger.info(f"Updated plot {request.plot_id} with location: {location}")
         
-        # If no plot_id provided, create a new plot
-        if not plot_id:
-            # Calculate area from geometry (rough estimate)
-            coords = get_centroid_from_geometry(request.geometry)
-            area_hectares = 10.0  # Default, can be calculated from geometry bounds
-            
-            # Default land_use to one of the proposal's two in-scope strata
-            # (IN_SCOPE_LAND_USE in models/land_plot.py), not "forest" —
-            # closed-canopy forest is explicitly out of scope for this
-            # capstone (see README "Project Scope"). ScanRequest carries no
-            # land_use field, so infer from the reverse-geocoded location
-            # string when it names one of the two pilot districts; otherwise
-            # fall back to "grassland" rather than an out-of-scope value.
+        # No plot_id provided directly — if this scan originated from a
+        # registration request, a plot was already created for it at
+        # submission time (see backend/routers/registration.py) so the
+        # steward's dashboard had something to show immediately. Find and
+        # enrich that same row instead of inserting a duplicate plot.
+        if not plot_id and registration_request_id:
+            existing = (
+                db.table("land_plots")
+                .select("*")
+                .eq("registration_request_id", registration_request_id)
+                .execute()
+            )
+            if existing.data:
+                plot = existing.data[0]
+                plot_id = plot["id"]
+                logger.info(f"Found pre-registered plot {plot_id} for registration request {registration_request_id}")
+
+        # Default land_use to one of the proposal's two in-scope strata
+        # (IN_SCOPE_LAND_USE in models/land_plot.py), not "forest" —
+        # closed-canopy forest is explicitly out of scope for this
+        # capstone (see README "Project Scope"). ScanRequest carries no
+        # land_use field, so infer from the reverse-geocoded location
+        # string when it names one of the two pilot districts; otherwise
+        # fall back to "grassland" rather than an out-of-scope value.
+        inferred_land_use = "grassland"
+        if "rulindo" in location.lower():
+            inferred_land_use = "agroforestry"
+        elif "bugesera" in location.lower():
             inferred_land_use = "grassland"
-            if "rulindo" in location.lower():
-                inferred_land_use = "agroforestry"
-            elif "bugesera" in location.lower():
-                inferred_land_use = "grassland"
+
+        if plot_id and plot:
+            # Enrich the pre-registered plot with the real geometry/location
+            # derived from satellite imagery, and mark it scanned.
+            update_fields = {
+                "geometry": request.geometry,
+                "region": location,
+                "status": "scanned",
+            }
+            try:
+                db.table("land_plots").update(update_fields).eq("id", plot_id).execute()
+                plot = {**plot, **update_fields}
+                logger.info(f"Updated pre-registered plot {plot_id} with scan geometry/location")
+            except Exception as update_err:
+                # 'status' column may not exist yet if
+                # migration_plot_registration_link.sql hasn't been applied.
+                logger.warning(f"Plot update failed with full schema, retrying without status: {update_err}")
+                try:
+                    db.table("land_plots").update({"geometry": request.geometry, "region": location}).eq("id", plot_id).execute()
+                    plot = {**plot, "geometry": request.geometry, "region": location}
+                except Exception as fallback_err:
+                    logger.warning(f"Failed to update pre-registered plot {plot_id}: {fallback_err}")
+
+        # Still no plot row (either no plot_id was ever supplied, or the
+        # supplied plot_id/registration_request_id didn't match anything in
+        # land_plots) — create one from scratch rather than silently
+        # proceeding with a plot_id that has no backing row, which would
+        # trip the scan_results/carbon_credits FK constraints downstream.
+        if not plot:
+            plot_id = None
+            area_hectares = 10.0  # Default, can be calculated from geometry bounds
 
             new_plot_id = str(uuid.uuid4())
             new_plot = {
@@ -93,7 +135,7 @@ async def run_scan(request: ScanRequest):
             except Exception as plot_insert_err:
                 plot_id = new_plot_id
                 logger.warning(f"Failed to insert plot to database: {plot_insert_err}, using generated ID {plot_id}")
-            
+
     except Exception as e:
         # Database not configured, use defaults
         logger.warning(f"Database not available: {e}")
