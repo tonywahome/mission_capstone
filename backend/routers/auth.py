@@ -1,291 +1,150 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
-import hashlib
-import secrets
 from datetime import datetime
 from database import get_admin_client
+from services.auth_deps import (
+    get_current_user,
+    get_current_user_no_role_required,
+    require_role,
+    AuthedUser,
+)
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
 # Roles per the revised capstone proposal (Section 3.4): steward,
-# verifier_analyst, research_admin. Legacy values ('landowner', 'business',
-# 'buyer', 'admin') are accepted and transparently remapped below so that
-# any pre-existing seed data/sessions keep working through the re-scope.
-VALID_ROLES = ("steward", "verifier_analyst", "research_admin")
-LEGACY_ROLE_MAP = {
-    "landowner": "steward",
-    "business": "verifier_analyst",
-    "buyer": "verifier_analyst",
-    "admin": "research_admin",
-}
-# Reverse map — used as a fallback if the live `users.role` CHECK
-# constraint hasn't been updated yet via migration_capstone_rescope.sql
-# (the original constraint only allows 'landowner'/'buyer'/'admin').
-ROLE_DB_FALLBACK = {
-    "steward": "landowner",
-    "verifier_analyst": "business",
-    "research_admin": "admin",
-}
+# analyst, research_admin. Stored in auth.users.app_metadata (see
+# /set-role below), never in a client-writable location.
+VALID_ROLES = ("steward", "analyst", "research_admin")
 
 
-class SignupRequest(BaseModel):
-    email: str
-    password: str
+class SetRoleRequest(BaseModel):
+    role: str
+    assigned_district: Optional[str] = None
     full_name: str
-    role: str  # 'steward', 'verifier_analyst', or 'research_admin'
     company_name: Optional[str] = None
     precise_location_consent: bool = False  # Section 3.6 safeguard 3
 
-class AuthResponse(BaseModel):
-    user: dict
-    token: str
 
-def hash_password(password: str) -> str:
-    """Simple password hashing (in production, use bcrypt or similar)."""
-    return hashlib.sha256(password.encode()).hexdigest()
+class ProfileResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    role: str
+    assigned_district: Optional[str] = None
+    company_name: Optional[str] = None
+    precise_location_consent: Optional[bool] = False
+    created_at: Optional[str] = None
 
-def verify_password(password: str, hashed: str) -> bool:
-    """Verify password against hash."""
-    return hash_password(password) == hashed
 
-def generate_token() -> str:
-    """Generate a simple session token."""
-    return secrets.token_urlsafe(32)
+@router.post("/set-role", response_model=ProfileResponse)
+async def set_role(data: SetRoleRequest, caller: AuthedUser = Depends(get_current_user_no_role_required)):
+    """Complete signup: assign a role (+ optional district) in the caller's
+    auth.users.app_metadata — service-role-only writable, so this can never
+    be self-escalated by a client — and create their public.profiles row.
+    Called by the frontend immediately after supabase.auth.signUp() resolves.
+    """
+    if data.role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Role must be one of {VALID_ROLES}",
+        )
 
-@router.post("/signup", response_model=AuthResponse)
-async def signup(data: SignupRequest):
-    """Create a new user account."""
+    db = get_admin_client()
+
     try:
-        db = get_admin_client()
+        db.auth.admin.update_user_by_id(
+            caller.id,
+            {
+                "app_metadata": {
+                    "role": data.role,
+                    "assigned_district": data.assigned_district,
+                }
+            },
+        )
+    except Exception as e:
+        logger.error(f"set-role: failed to update app_metadata for {caller.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to assign role",
+        )
 
-        # Remap legacy role names, then validate
-        role = LEGACY_ROLE_MAP.get(data.role, data.role)
-        if role not in VALID_ROLES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Role must be one of {VALID_ROLES}"
-            )
+    profile_data = {
+        "id": caller.id,
+        "email": caller.email,
+        "full_name": data.full_name,
+        "company_name": data.company_name,
+        "precise_location_consent": data.precise_location_consent,
+        "created_at": datetime.now().isoformat(),
+    }
 
-        # Check if email already exists
-        existing = db.table("users").select("*").eq("email", data.email).execute()
-        if existing.data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
-
-        # Create user
-        user_data = {
-            "email": data.email,
-            "password_hash": hash_password(data.password),
-            "full_name": data.full_name,
-            "role": role,
-            "company_name": data.company_name,
-            "precise_location_consent": data.precise_location_consent,
-            "created_at": datetime.now().isoformat(),
-        }
-
-        try:
-            result = db.table("users").insert(user_data).execute()
-        except Exception as insert_err:
-            # `precise_location_consent` is only a real column once
-            # backend/data/migration_capstone_rescope.sql has been applied.
-            # Fall back to the legacy column set so signup keeps working
-            # before that migration is run.
-            logger.warning(
-                f"Insert with precise_location_consent failed ({insert_err}); "
-                "retrying without it — apply migration_capstone_rescope.sql."
-            )
-            user_data.pop("precise_location_consent", None)
-            try:
-                result = db.table("users").insert(user_data).execute()
-            except Exception as role_err:
-                # The live `role` CHECK constraint may still only allow the
-                # pre-rescope values. Fall back to the legacy role name so
-                # signup keeps working until the migration is applied.
-                logger.warning(
-                    f"Insert with role='{role}' failed ({role_err}); "
-                    f"retrying with legacy role name — apply migration_capstone_rescope.sql."
-                )
-                user_data["role"] = ROLE_DB_FALLBACK.get(role, role)
-                result = db.table("users").insert(user_data).execute()
-
+    try:
+        # upsert (not insert): makes this endpoint safely retryable — if a
+        # prior call updated app_metadata.role but then failed here, the
+        # caller now passes get_current_user's role check and may retry
+        # set-role, which must not fail on a duplicate-key conflict.
+        result = db.table("profiles").upsert(profile_data).execute()
         if not result.data:
+            logger.error(f"set-role: profile upsert returned no data for {caller.id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user"
+                detail="Failed to create profile",
             )
-        
-        user = result.data[0]
-        token = generate_token()
-        
-        # Store token (in production, use a proper session store)
-        db.table("sessions").insert({
-            "user_id": user["id"],
-            "token": token,
-            "created_at": datetime.now().isoformat(),
-        }).execute()
-        
-        # Remove password hash from response
-        user_response = {k: v for k, v in user.items() if k != "password_hash"}
-        
-        logger.info(f"User created: {user['email']} (role: {user['role']})")
-        
-        return AuthResponse(user=user_response, token=token)
-        
+        profile = result.data[0]
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Signup error: {e}")
+        logger.error(f"set-role: profile upsert failed for {caller.id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create account"
+            detail="Failed to create profile",
         )
 
-@router.post("/login", response_model=AuthResponse)
-async def login(data: LoginRequest):
-    """Authenticate user and return session token."""
-    try:
-        db = get_admin_client()
-        
-        logger.info(f"Login attempt for email: {data.email}")
-        
-        # Find user by email
-        result = db.table("users").select("*").eq("email", data.email).execute()
-        
-        if not result.data:
-            logger.warning(f"Login failed: User not found for email {data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
-        
-        user = result.data[0]
-        logger.info(f"User found: {user['email']}, checking password...")
-        
-        # Verify password
-        if not verify_password(data.password, user.get("password_hash", "")):
-            logger.warning(f"Login failed: Invalid password for email {data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
-        
-        logger.info(f"Password verified for {user['email']}")
-        
-        # Generate token
-        token = generate_token()
-        
-        # Store session
-        db.table("sessions").insert({
-            "user_id": user["id"],
-            "token": token,
-            "created_at": datetime.now().isoformat(),
-        }).execute()
-        
-        # Remove password hash from response
-        user_response = {k: v for k, v in user.items() if k != "password_hash"}
-        
-        logger.info(f"User logged in successfully: {user['email']}")
-        
-        return AuthResponse(user=user_response, token=token)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Login error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed"
-        )
+    logger.info(f"Role assigned: {caller.email} -> {data.role}")
 
-@router.post("/logout")
-async def logout(token: str):
-    """Logout user and invalidate token."""
-    try:
-        db = get_admin_client()
-        db.table("sessions").delete().eq("token", token).execute()
-        return {"message": "Logged out successfully"}
-    except Exception as e:
-        logger.error(f"Logout error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Logout failed"
-        )
+    return ProfileResponse(
+        **{
+            **profile,
+            "role": data.role,
+            "assigned_district": data.assigned_district,
+        }
+    )
 
-@router.get("/me")
-async def get_current_user(token: str):
-    """Get current user from token."""
-    try:
-        db = get_admin_client()
-        
-        # Find session
-        session_result = db.table("sessions").select("user_id").eq("token", token).execute()
-        
-        if not session_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token"
-            )
-        
-        user_id = session_result.data[0]["user_id"]
-        
-        # Get user
-        user_result = db.table("users").select("*").eq("id", user_id).execute()
-        
-        if not user_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
-        user = user_result.data[0]
-        user_response = {k: v for k, v in user.items() if k != "password_hash"}
-        
-        return user_response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get user error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get user"
-        )
+
+@router.get("/me", response_model=ProfileResponse)
+async def get_current_profile(caller: AuthedUser = Depends(get_current_user)):
+    """Return the verified caller's identity + profile."""
+    db = get_admin_client()
+    result = db.table("profiles").select("*").eq("id", caller.id).execute()
+
+    profile = result.data[0] if result.data else {}
+
+    return ProfileResponse(
+        id=caller.id,
+        email=caller.email,
+        role=caller.role,
+        assigned_district=caller.assigned_district,
+        full_name=profile.get("full_name", ""),
+        company_name=profile.get("company_name"),
+        precise_location_consent=profile.get("precise_location_consent", False),
+        created_at=profile.get("created_at"),
+    )
 
 
 @router.get("/user-by-email")
-async def get_user_by_email(email: str):
-    """Get user by email address (for internal use)."""
-    try:
-        db = get_admin_client()
-        
-        # Get user by email
-        user_result = db.table("users").select("*").eq("email", email).execute()
-        
-        if not user_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
-        user = user_result.data[0]
-        user_response = {k: v for k, v in user.items() if k != "password_hash"}
-        
-        return user_response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get user by email error: {e}")
+async def get_user_by_email(
+    email: str, caller: AuthedUser = Depends(require_role("research_admin"))
+):
+    """Resolve an email to its profile (id, name, etc). research_admin only —
+    used by the admin 'Auto Scan on behalf of a steward' workflow."""
+    db = get_admin_client()
+    result = db.table("profiles").select("*").eq("email", email.strip().lower()).execute()
+
+    if not result.data:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get user by email"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+
+    return result.data[0]

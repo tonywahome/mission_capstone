@@ -20,9 +20,14 @@ function ScanPageContent() {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [area, setArea] = useState<number>(0);
+  // Set only when arriving from the admin "Auto Scan on behalf of a
+  // steward" flow (admin/requests/page.tsx) — a research_admin scanning
+  // their own plot leaves this unset and the backend derives owner_id from
+  // their session instead.
+  const [adminScanOwnerId, setAdminScanOwnerId] = useState<string | null>(null);
+  // Display-only (name/email/location) — never sent to the backend, purely
+  // for the "Registration request" sidebar card below.
   const [ownerInfo, setOwnerInfo] = useState<any>(null);
-  // resolved once on map load — persists even after localStorage is cleared
-  const [resolvedOwnerId, setResolvedOwnerId] = useState<string>("demo-user");
   const [registrationRequestId, setRegistrationRequestId] = useState<
     string | null
   >(null);
@@ -93,7 +98,8 @@ function ScanPageContent() {
 
         mapInstance.on("load", async () => {
           const storedGeometry = localStorage.getItem("scanGeometry");
-          const storedOwnerStr = localStorage.getItem("scanOwnerInfo");
+          const storedOwnerId = localStorage.getItem("scanOwnerId");
+          const storedOwnerInfo = localStorage.getItem("scanOwnerInfo");
 
           if (storedGeometry && drawInstance) {
             try {
@@ -125,38 +131,20 @@ function ScanPageContent() {
             setRegistrationRequestId(storedRequestId);
           }
 
-          if (storedOwnerStr) {
+          if (storedOwnerId) {
+            setAdminScanOwnerId(storedOwnerId);
+          }
+          if (storedOwnerInfo) {
             try {
-              const info = JSON.parse(storedOwnerStr);
-              setOwnerInfo(info);
-
-              // Resolve the real user_id NOW (before localStorage is cleared)
-              // and keep it in state so handleScan can use it later.
-              if (info.email) {
-                const res = await fetch(
-                  `/api/auth/user-by-email?email=${encodeURIComponent(info.email)}`,
-                );
-                if (res.ok) {
-                  const userData = await res.json();
-                  if (userData.id) {
-                    setResolvedOwnerId(userData.id);
-                    console.log("Resolved owner_id:", userData.id);
-                  }
-                } else {
-                  console.warn(
-                    "user-by-email returned",
-                    res.status,
-                    "— will use demo-user",
-                  );
-                }
-              }
+              setOwnerInfo(JSON.parse(storedOwnerInfo));
             } catch (e) {
-              console.warn("Could not resolve owner from stored info:", e);
+              console.warn("Could not parse stored owner info:", e);
             }
           }
 
-          // Clear after resolving everything
+          // Clear after reading everything
           localStorage.removeItem("scanGeometry");
+          localStorage.removeItem("scanOwnerId");
           localStorage.removeItem("scanOwnerInfo");
           localStorage.removeItem("scanRequestId");
         });
@@ -208,23 +196,14 @@ function ScanPageContent() {
     setScanResult(null);
 
     try {
-      // Use the owner_id resolved during map load (in state, not localStorage which was cleared)
       const result = (await api.runScan({
         geometry: drawnGeometry,
-        owner_id: resolvedOwnerId,
+        owner_id: adminScanOwnerId ?? undefined,
         registration_request_id: registrationRequestId ?? undefined,
       })) as ScanResult;
 
       setScanResult(result);
-
-      if (ownerInfo && resolvedOwnerId !== "demo-user") {
-        showToast(
-          "success",
-          `Scan complete. Click "Submit for Review" to proceed.`,
-        );
-      } else {
-        showToast("success", "Scan complete. Click \"Submit for Review\" to proceed.");
-      }
+      showToast("success", "Scan complete. Click \"Submit for Review\" to proceed.");
     } catch (err: any) {
       console.error("Scan failed:", err);
       showToast(
@@ -242,33 +221,14 @@ function ScanPageContent() {
     setSubmitting(true);
 
     try {
-      const payload = {
+      await api.submitScanForReview({
         scan_id: scanResult.scan_id,
         plot_id: scanResult.plot_id,
-        owner_id: resolvedOwnerId,
+        owner_id: adminScanOwnerId ?? undefined,
         tco2e: scanResult.estimated_tco2e,
         integrity_score: scanResult.integrity_score,
         risk_score: scanResult.risk_adjustment,
-      };
-
-      console.log("Submitting scan for review with payload:", payload);
-
-      const response = await fetch("/api/scan/submit-review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
       });
-
-      const responseData = await response.json();
-      console.log("Response status:", response.status, "Data:", responseData);
-
-      if (!response.ok) {
-        throw new Error(
-          responseData.detail ||
-            responseData.message ||
-            "Failed to submit scan for review"
-        );
-      }
 
       showToast("success", "Scan submitted for verifier review!");
       setScanResult(null);
@@ -356,14 +316,12 @@ function ScanPageContent() {
               </div>
               <div
                 className={`mt-2.5 pt-2.5 border-t border-[var(--color-border)] flex items-center gap-1.5 text-xs font-semibold ${
-                  resolvedOwnerId !== "demo-user"
-                    ? "text-emerald-600"
-                    : "text-amber-600"
+                  adminScanOwnerId ? "text-emerald-600" : "text-amber-600"
                 }`}
               >
-                {resolvedOwnerId !== "demo-user"
+                {adminScanOwnerId
                   ? "✓ Owner ID resolved — notification will reach this user"
-                  : "⚠ Owner ID not resolved — scan will use demo account"}
+                  : "⚠ Owner ID not resolved — scan will use your own account"}
               </div>
             </div>
           )}

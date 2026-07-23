@@ -1,14 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth, UserRole } from "@/contexts/AuthContext";
 
+// Mirrors ProtectedRoute.tsx's role -> route mapping for an already-logged-in user.
+function routeForRole(role: UserRole): string {
+  if (role === "steward") return "/scan";
+  if (role === "analyst") return "/landowner/pending-scans";
+  return "/";
+}
+
 export default function SignupPage() {
+  const { signup, pendingConfirmation, user, isAuthenticated } = useAuth();
   const router = useRouter();
-  const { signup } = useAuth();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -19,6 +26,7 @@ export default function SignupPage() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,13 +35,53 @@ export default function SignupPage() {
 
     try {
       await signup(formData);
-      router.push("/");
+      setSubmitted(true);
     } catch (err: any) {
       setError(err.message || "Signup failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
+
+  // Only redirect once signup() has actually resolved successfully — a
+  // session existed and set-role succeeded, so the user is already logged
+  // in and does not need to check their email.
+  useEffect(() => {
+    if (submitted && isAuthenticated && user) {
+      router.push(routeForRole(user.role));
+    }
+  }, [submitted, isAuthenticated, user, router]);
+
+  if (submitted && isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-terra-50 to-green-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <p className="text-sm text-gray-600">Redirecting...</p>
+      </div>
+    );
+  }
+
+  if (submitted && pendingConfirmation) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-terra-50 to-green-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full text-center bg-white rounded-2xl shadow-lg p-8 space-y-4">
+          <div className="flex justify-center">
+            <Image src="/logo.png" alt="TerraFoma" width={100} height={100} className="object-contain" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900">Check your email</h2>
+          <p className="text-sm text-gray-600">
+            We sent a confirmation link to <strong>{formData.email}</strong>.
+            Click it to activate your account, then sign in.
+          </p>
+          <Link
+            href="/login"
+            className="inline-block mt-2 font-semibold text-terra-600 hover:text-terra-700"
+          >
+            Back to sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-terra-50 to-green-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -84,16 +132,16 @@ export default function SignupPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    setFormData({ ...formData, role: "verifier_analyst" })
+                    setFormData({ ...formData, role: "analyst" })
                   }
                   className={`p-4 border-2 rounded-lg text-left transition-all ${
-                    formData.role === "verifier_analyst"
+                    formData.role === "analyst"
                       ? "border-terra-600 bg-terra-50"
                       : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
                   <div className="text-2xl mb-2">🔎</div>
-                  <div className="font-semibold text-sm">Verifier / Analyst</div>
+                  <div className="font-semibold text-sm">Analyst</div>
                   <div className="text-xs text-gray-500 mt-1">
                     Review scans for the audit trail
                   </div>
@@ -144,7 +192,7 @@ export default function SignupPage() {
               />
             </div>
 
-            {formData.role === "verifier_analyst" && (
+            {formData.role === "analyst" && (
               <div>
                 <label
                   htmlFor="company_name"
@@ -238,6 +286,22 @@ export default function SignupPage() {
               Sign in
             </Link>
           </p>
+        </div>
+
+        {/* Deliberately low-key — Research Admin is a backend-tier role not
+            meant to be advertised alongside Land Steward / Analyst. */}
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={() =>
+              setFormData({ ...formData, role: "research_admin" })
+            }
+            className="text-xs text-gray-400 hover:text-terra-600 underline"
+          >
+            {formData.role === "research_admin"
+              ? "✓ Registering as Research Administrator"
+              : "Sign up as Research Administrator instead"}
+          </button>
         </div>
       </div>
     </div>

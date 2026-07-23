@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
 from datetime import datetime
-from database import get_supabase_client, get_admin_client
+from database import get_admin_client
+from services.auth_deps import get_current_user, require_role, AuthedUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/landowner", tags=["landowner"])
@@ -33,26 +34,38 @@ class ApprovalRequest(BaseModel):
     rejection_reason: Optional[str] = None
 
 
+class UnsubmitRequest(BaseModel):
+    credit_id: str
+
+
 @router.get("/pending-scans")
-async def get_pending_scans(user_id: str, plot_id: Optional[str] = None):
+async def get_pending_scans(
+    plot_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    caller: AuthedUser = Depends(get_current_user),
+):
     """
-    Get scan results for a landowner.
+    Get scan results for the authenticated steward.
     - Without plot_id: returns only pending_approval credits (dashboard mode).
     - With plot_id: returns all credits for that specific plot (all statuses).
     """
+    if caller.role not in ("steward", "research_admin"):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     try:
         db = get_admin_client()
 
         query = db.table("carbon_credits")\
             .select("*, scan_results(*), land_plots(name)")\
-            .eq("owner_id", user_id)
+            .eq("owner_id", caller.id)
 
         if plot_id:
             query = query.eq("plot_id", plot_id)
         else:
             query = query.eq("status", "pending_approval")
 
-        credits_result = query.order("created_at", desc=True).execute()
+        credits_result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
 
         if not credits_result.data:
             return {"pending_scans": []}
@@ -89,21 +102,24 @@ async def get_pending_scans(user_id: str, plot_id: Optional[str] = None):
 
 
 @router.get("/verification-queue")
-async def get_verification_queue(verifier_id: str):
+async def get_verification_queue(
+    limit: int = 50,
+    offset: int = 0,
+    caller: AuthedUser = Depends(require_role("analyst", "research_admin")),
+):
     """
-    District-scoped audit queue for a verifier_analyst (Section 3.4/3.6).
+    District-scoped audit queue for an analyst (Section 3.4/3.6).
 
     Unlike /pending-scans above (which is owner_id-scoped — i.e. it only
-    ever returns records a STEWARD owns), this endpoint is meant to be
-    called by a verifier_analyst and returns pending records across ALL
-    stewards, narrowed to the verifier's `assigned_district` when one is
-    set on their user row.
+    ever returns records a STEWARD owns), this endpoint returns pending
+    records across ALL stewards, narrowed to the caller's
+    `assigned_district` (read from their verified JWT app_metadata — see
+    backend/services/auth_deps.py) when one is set.
 
     Falls back to an unscoped queue (all districts) when:
-      - the verifier has no `assigned_district` set, or
-      - the `users.assigned_district` / `land_plots.district` columns don't
-        exist yet (pre-migration) — see
-        backend/data/migration_capstone_rescope.sql.
+      - the caller has no `assigned_district` set, or
+      - the `land_plots.district` column doesn't exist yet (pre-migration) —
+        see backend/data/migration_capstone_rescope.sql.
 
     This fallback is intentionally permissive (shows MORE records, not
     fewer) — under-scoping an audit queue is a workflow/usability gap, not
@@ -115,18 +131,7 @@ async def get_verification_queue(verifier_id: str):
     """
     try:
         db = get_admin_client()
-
-        assigned_district = None
-        try:
-            verifier_res = db.table("users").select("assigned_district").eq("id", verifier_id).execute()
-            if verifier_res.data:
-                assigned_district = verifier_res.data[0].get("assigned_district")
-        except Exception as lookup_err:
-            logger.warning(
-                f"verification-queue: could not read assigned_district for "
-                f"verifier {verifier_id} ({lookup_err}); showing unscoped queue. "
-                "Apply backend/data/migration_capstone_rescope.sql to add this column."
-            )
+        assigned_district = caller.assigned_district
 
         credits_result = None
         if assigned_district:
@@ -137,6 +142,7 @@ async def get_verification_queue(verifier_id: str):
                     .in_("status", ["pending_approval", "pending_review"])
                     .eq("land_plots.district", assigned_district)
                     .order("created_at", desc=True)
+                    .range(offset, offset + limit - 1)
                     .execute()
                 )
             except Exception as filter_err:
@@ -154,6 +160,7 @@ async def get_verification_queue(verifier_id: str):
                 .select("*, scan_results(*), land_plots(name, district, owner_id)")
                 .in_("status", ["pending_approval", "pending_review"])
                 .order("created_at", desc=True)
+                .range(offset, offset + limit - 1)
                 .execute()
             )
 
@@ -193,9 +200,13 @@ async def get_verification_queue(verifier_id: str):
 
 
 @router.post("/approve-listing")
-async def verify_scan_record(data: ApprovalRequest, background_tasks: BackgroundTasks):
+async def verify_scan_record(
+    data: ApprovalRequest,
+    background_tasks: BackgroundTasks,
+    caller: AuthedUser = Depends(require_role("analyst", "research_admin")),
+):
     """
-    Verifier-Analyst review of a submitted scan/field-data record.
+    Analyst review of a submitted scan/field-data record.
 
     Repurposed from the original marketplace "list for sale" approval flow:
     this capstone has no secondary market, so the same underlying record
@@ -211,7 +222,7 @@ async def verify_scan_record(data: ApprovalRequest, background_tasks: Background
     changed.
     """
     try:
-        db = get_supabase_client()
+        db = get_admin_client()
 
         # Verify record exists and is pending review
         credit_result = db.table("carbon_credits")\
@@ -300,16 +311,83 @@ async def verify_scan_record(data: ApprovalRequest, background_tasks: Background
         raise HTTPException(status_code=500, detail="Failed to process verification")
 
 
-@router.get("/my-credits")
-async def get_my_submissions(user_id: str):
-    """Get all scan/verification records for a steward's projects (all statuses)."""
+@router.post("/unsubmit")
+async def unsubmit_scan_record(
+    data: UnsubmitRequest,
+    caller: AuthedUser = Depends(get_current_user),
+):
+    """
+    Steward-side counterpart to verify_scan_record above: verifying/flagging
+    a record is an analyst / research_admin action only, so a
+    steward who wants to pull back their own not-yet-reviewed submission
+    (e.g. to correct a mistake) needs a different action — withdraw it from
+    the queue rather than "approve" or "flag" their own work.
+    """
+    if caller.role not in ("steward", "research_admin"):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     try:
-        db = get_supabase_client()
+        db = get_admin_client()
+
+        credit_result = db.table("carbon_credits")\
+            .select("*, land_plots(owner_id)")\
+            .eq("id", data.credit_id)\
+            .execute()
+
+        if not credit_result.data:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        credit = credit_result.data[0]
+        plot = credit.get("land_plots") or {}
+        owner_id = credit.get("owner_id") or plot.get("owner_id")
+
+        if caller.role != "research_admin" and owner_id != caller.id:
+            raise HTTPException(status_code=403, detail="Not authorized to unsubmit this record")
+
+        if credit["status"] not in ("pending_approval", "pending_review"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only pending submissions can be unsubmitted (current status: {credit['status']})"
+            )
+
+        db.table("carbon_credits")\
+            .update({"status": "withdrawn", "updated_at": datetime.now().isoformat()})\
+            .eq("id", data.credit_id)\
+            .execute()
+
+        logger.info(f"Submission {data.credit_id} withdrawn by {caller.role} {caller.id}")
+
+        return {
+            "message": "Submission withdrawn",
+            "credit_id": data.credit_id,
+            "new_status": "withdrawn",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unsubmitting record: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to unsubmit record")
+
+
+@router.get("/my-credits")
+async def get_my_submissions(
+    limit: int = 50,
+    offset: int = 0,
+    caller: AuthedUser = Depends(get_current_user),
+):
+    """Get all scan/verification records for the authenticated steward's projects (all statuses)."""
+    if caller.role not in ("steward", "research_admin"):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    try:
+        db = get_admin_client()
 
         result = db.table("carbon_credits")\
             .select("*, land_plots(name, area_hectares), scan_results(mean_ndvi, mean_evi)")\
-            .eq("owner_id", user_id)\
+            .eq("owner_id", caller.id)\
             .order("created_at", desc=True)\
+            .range(offset, offset + limit - 1)\
             .execute()
 
         return {"credits": result.data or []}

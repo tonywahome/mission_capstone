@@ -50,11 +50,11 @@ Local calibration of machine-learning biomass models against Rwandan field measu
 
 The application implements three roles per the proposal's Section 3.4 class diagram (`backend/models/user.py`, `VALID_ROLES`):
 
-| Role               | Was (pre-rescope)    | Responsibilities                                                                                                          |
-| ------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `steward`          | `landowner`          | Registers plots, draws boundaries, submits field/scan data for review.                                                    |
-| `verifier_analyst` | `business` / `buyer` | Reviews submitted scans/field data via a district-scoped audit queue; confirms or flags records for the audit trail.      |
-| `research_admin`   | `admin`              | Backend tier with exclusive access to full-precision (unrounded) coordinate data, per the Section 3.6 ethical safeguards. |
+| Role             | Was (pre-rescope)                       | Responsibilities                                                                                                          |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `steward`        | `landowner`                             | Registers plots, draws boundaries, submits field/scan data for review.                                                    |
+| `analyst`        | `verifier_analyst` / `business`/`buyer` | Reviews submitted scans/field data via a district-scoped audit queue; confirms or flags records for the audit trail.      |
+| `research_admin` | `admin`                                 | Backend tier with exclusive access to full-precision (unrounded) coordinate data, per the Section 3.6 ethical safeguards. |
 
 Legacy role strings (`landowner`, `buyer`, `admin`, `business`) are still accepted at the database layer — `backend/data/migration_capstone_rescope.sql` widens the `users.role` CHECK constraint additively rather than renaming values, and `backend/routers/auth.py` transparently remaps between old and new names in both directions. This keeps any pre-existing seed data or in-flight sessions valid through the re-scope.
 
@@ -115,7 +115,7 @@ Sentinel-2 spectral bands (6: blue, green, red, nir, swir1, swir2); vegetation i
 Four safeguards are specified in the proposal; their implementation status:
 
 1. **Coordinate rounding.** `backend/services/privacy.py` rounds stored coordinates to 3 decimal places (~111 m at the equator) for any role other than `research_admin`. This is a **fail-closed** design: on any error, it rounds rather than returning unrounded data.
-2. **Role-/district-scoped access.** `users.assigned_district` scopes a `verifier_analyst`'s audit queue (`GET /api/landowner/verification-queue`) to one district. This is deliberately **fail-open/permissive** — if the column doesn't exist yet or is unset, the queue falls back to showing all districts rather than none, since under-scoping an audit queue is a usability gap, not a confidentiality leak (the opposite fallback direction from safeguard 1, and documented as such in both modules to avoid conflating the two).
+2. **Role-/district-scoped access.** `users.assigned_district` scopes an `analyst`'s audit queue (`GET /api/landowner/verification-queue`) to one district. This is deliberately **fail-open/permissive** — if the column doesn't exist yet or is unset, the queue falls back to showing all districts rather than none, since under-scoping an audit queue is a usability gap, not a confidentiality leak (the opposite fallback direction from safeguard 1, and documented as such in both modules to avoid conflating the two).
 3. **Separate precise-location consent.** `precise_location_consent` is a distinct, explicit boolean on `SignupRequest`/`users`, defaulting to `False`. Consenting to an account does not imply consenting to full-precision coordinate storage.
 4. **Defined retention period.** `users.data_retention_until` exists as a column (added by `backend/data/migration_capstone_rescope.sql`) but is **not yet enforced** — no scheduled job purges or anonymizes data once this date passes. This is a known limitation, not a completed safeguard.
 
@@ -169,7 +169,7 @@ mission_capstone/
 │   ├── main.py                     # FastAPI entry — registers only the live routers below
 │   ├── config.py / database.py
 │   ├── routers/                    # LIVE
-│   │   ├── auth.py                 # Signup/login/session (steward, verifier_analyst, research_admin)
+│   │   ├── auth.py                 # Signup/login/session (steward, analyst, research_admin)
 │   │   ├── registration.py         # Plot registration requests
 │   │   ├── scan.py                 # AI satellite scan trigger + lookup
 │   │   ├── landowner.py            # Pending-scans, verification-queue, approve-listing, my-credits
@@ -217,7 +217,7 @@ Scan            POST /api/scan
                 GET  /api/scan/{scan_id}
 
 Landowner /     GET  /api/landowner/pending-scans      (steward-scoped)
-Verification    GET  /api/landowner/verification-queue  (verifier_analyst, district-scoped)
+Verification    GET  /api/landowner/verification-queue  (analyst, district-scoped)
                 POST /api/landowner/approve-listing
                 GET  /api/landowner/my-credits
 
@@ -526,7 +526,7 @@ Run this checklist to ensure everything is working:
 2. Fill in the form:
    - **Email**: any email (doesn't need to be real for local testing)
    - **Password**: any secure password
-   - **Role**: Choose `steward`, `verifier_analyst`, or `research_admin`
+   - **Role**: Choose `steward`, `analyst`, or `research_admin`
    - **District**: `Bugesera` or `Rulindo`
 3. Click **Sign Up**
 4. You're now logged in! Explore the dashboard:

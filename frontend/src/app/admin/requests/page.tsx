@@ -41,7 +41,7 @@ export default function AdminRegistrationsPage() {
     setReviewingId(request.id);
     setReviewError(null);
     try {
-      await api.approveRegistrationRequest(request.id, user?.id);
+      await api.approveRegistrationRequest(request.id);
       applyReviewResult(request.id, "approved");
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : "Failed to approve request");
@@ -55,7 +55,7 @@ export default function AdminRegistrationsPage() {
     setReviewingId(request.id);
     setReviewError(null);
     try {
-      await api.rejectRegistrationRequest(request.id, user?.id, reason);
+      await api.rejectRegistrationRequest(request.id, reason);
       applyReviewResult(request.id, "rejected");
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : "Failed to reject request");
@@ -64,22 +64,30 @@ export default function AdminRegistrationsPage() {
     }
   };
 
-  const handleScanWithGeometry = (request: RegistrationRequest) => {
-    if (request.geometry) {
-      // Store geometry and request info in localStorage for the scan page
+  const handleScanWithGeometry = async (request: RegistrationRequest) => {
+    if (!request.geometry) {
+      alert("This registration doesn't have geometry data. Please use manual scanning.");
+      return;
+    }
+    try {
+      // Resolve the steward's real owner_id via the plot created at
+      // submission time, so the admin can scan on their behalf (research_admin
+      // only — see backend/routers/scan.py's effective_owner_id logic).
+      const plot = await api.getPlotForRegistrationRequest(request.id) as { owner_id: string };
       localStorage.setItem("scanGeometry", JSON.stringify(request.geometry));
       localStorage.setItem("scanRequestId", request.id);
+      localStorage.setItem("scanOwnerId", plot.owner_id);
+      // Display-only info for the scan page's sidebar card — never used for
+      // authorization (the backend derives owner_id from scanOwnerId above,
+      // verified against the caller's research_admin role server-side).
       localStorage.setItem("scanOwnerInfo", JSON.stringify({
         name: request.owner_name,
         email: request.owner_email,
         location: request.land_location,
-        size: request.land_size,
-        type: request.land_type,
       }));
-      // Navigate to scan page
       window.location.href = "/scan";
-    } else {
-      alert("This registration doesn't have geometry data. Please use manual scanning.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not resolve the steward for this request.");
     }
   };
 
@@ -90,18 +98,8 @@ export default function AdminRegistrationsPage() {
   const fetchRequests = async () => {
     try {
       setLoading(true);
-      const url = filter === "all" 
-        ? `/api/registration/requests`
-        : `/api/registration/requests?status=${filter}`;
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error("Failed to fetch registration requests");
-      }
-      
-      const data = await response.json();
-      setRequests(data);
+      const data = await api.getRegistrationRequests(filter === "all" ? undefined : filter);
+      setRequests(data as RegistrationRequest[]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");

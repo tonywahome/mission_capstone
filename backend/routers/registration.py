@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 import logging
@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime
 from database import get_admin_client
+from services.auth_deps import get_current_user, require_role, AuthedUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/registration", tags=["registration"])
@@ -26,25 +27,25 @@ class RegistrationRequest(BaseModel):
     additional_info: Optional[str] = None
 
 @router.post("/request")
-async def submit_registration_request(request: Request, background_tasks: BackgroundTasks):
+async def submit_registration_request(
+    data: RegistrationRequest,
+    background_tasks: BackgroundTasks,
+    caller: AuthedUser = Depends(get_current_user),
+):
     """Submit a land registration request. Admin will be notified via email."""
+    if caller.role != "steward":
+        raise HTTPException(status_code=403, detail="Only stewards can submit registration requests")
+
     try:
-        # Parse JSON body
-        data = await request.json()
-
         # Extract fields from request
-        owner_id = data.get("owner_id")
-        owner_name = data.get("owner_name")
-        owner_email = data.get("owner_email")
-        land_location = data.get("land_location")
-        land_size = data.get("land_size")
-        land_type = data.get("land_type")
-        additional_info = data.get("additional_info")
-        geometry = data.get("geometry")
-
-        # Validate required fields
-        if not all([owner_name, owner_email, land_location, land_size, land_type]):
-            raise HTTPException(status_code=400, detail="Missing required fields: owner_name, owner_email, land_location, land_size, land_type")
+        owner_id = caller.id  # server-derived, never trust a client-sent value
+        owner_name = data.owner_name
+        owner_email = data.owner_email
+        land_location = data.land_location
+        land_size = data.land_size
+        land_type = data.land_type
+        additional_info = data.additional_info
+        geometry = data.geometry
 
         db = get_admin_client()
         
@@ -119,6 +120,7 @@ async def submit_registration_request(request: Request, background_tasks: Backgr
                     logger.info(f"Created plot for registration request {request_id} using fallback schema")
                 except Exception as fallback_err:
                     logger.error(f"Failed to create plot for registration request {request_id}: {fallback_err}")
+                    raise HTTPException(status_code=500, detail="Failed to create land plot for this registration request")
         else:
             logger.warning(f"No owner_id provided with registration request {request_id}; skipping plot creation")
 
@@ -202,8 +204,13 @@ TerraFoma Carbon Credit Platform
         # Don't raise exception - notification failure shouldn't block request
 
 @router.get("/requests")
-async def get_registration_requests(status: Optional[str] = None):
-    """Get all registration requests (admin only)."""
+async def get_registration_requests(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    caller: AuthedUser = Depends(require_role("analyst", "research_admin")),
+):
+    """Get registration requests (analyst/research_admin only), paginated."""
     try:
         db = get_admin_client()
 
@@ -212,7 +219,7 @@ async def get_registration_requests(status: Optional[str] = None):
         if status:
             query = query.eq("status", status)
 
-        result = query.order("created_at", desc=True).execute()
+        result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
 
         return result.data
 
@@ -224,13 +231,40 @@ async def get_registration_requests(status: Optional[str] = None):
         )
 
 
+@router.get("/requests/{request_id}/plot")
+async def get_plot_for_registration_request(
+    request_id: str,
+    caller: AuthedUser = Depends(require_role("research_admin")),
+):
+    """Return the land_plots row created for this registration request, so
+    the admin 'Auto Scan on behalf of a steward' flow can obtain the real
+    owner_id without needing an unauthenticated email-resolution lookup."""
+    db = get_admin_client()
+    try:
+        result = (
+            db.table("land_plots")
+            .select("*")
+            .eq("registration_request_id", request_id)
+            .execute()
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch plot for registration request {request_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch plot for this registration request")
+    if not result.data:
+        raise HTTPException(status_code=404, detail="No plot found for this registration request")
+    return result.data[0]
+
+
 class ReviewRequest(BaseModel):
-    reviewer_id: Optional[str] = None
     rejection_reason: Optional[str] = None
 
 
 @router.post("/requests/{request_id}/approve")
-async def approve_registration_request(request_id: str, body: ReviewRequest):
+async def approve_registration_request(
+    request_id: str,
+    body: ReviewRequest,
+    caller: AuthedUser = Depends(require_role("research_admin")),
+):
     """
     Admin greenlights a pending registration request for scanning.
 
@@ -259,9 +293,8 @@ async def approve_registration_request(request_id: str, body: ReviewRequest):
     update_data = {
         "status": "approved",
         "processed_at": datetime.now().isoformat(),
+        "processed_by": caller.id,
     }
-    if body.reviewer_id:
-        update_data["processed_by"] = body.reviewer_id
 
     try:
         db.table("registration_requests").update(update_data).eq("id", request_id).execute()
@@ -276,7 +309,11 @@ async def approve_registration_request(request_id: str, body: ReviewRequest):
 
 
 @router.post("/requests/{request_id}/reject")
-async def reject_registration_request(request_id: str, body: ReviewRequest):
+async def reject_registration_request(
+    request_id: str,
+    body: ReviewRequest,
+    caller: AuthedUser = Depends(require_role("research_admin")),
+):
     """Admin declines a pending registration request. The plot created at
     submission time is removed so it no longer shows on the steward's
     dashboard (it never had a real scan/credit attached, since only pending
@@ -298,9 +335,8 @@ async def reject_registration_request(request_id: str, body: ReviewRequest):
         "status": "rejected",
         "processed_at": datetime.now().isoformat(),
         "rejection_reason": body.rejection_reason,
+        "processed_by": caller.id,
     }
-    if body.reviewer_id:
-        update_data["processed_by"] = body.reviewer_id
 
     try:
         db.table("registration_requests").update(update_data).eq("id", request_id).execute()
@@ -332,7 +368,7 @@ def _notify_steward_of_review(db, request_row: dict, approved: bool, rejection_r
         owner_email = request_row.get("owner_email")
         if not owner_email:
             return
-        user_res = db.table("users").select("id").eq("email", owner_email).execute()
+        user_res = db.table("profiles").select("id").eq("email", owner_email).execute()
         if not user_res.data:
             return
         user_id = user_res.data[0]["id"]

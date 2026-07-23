@@ -3,7 +3,8 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
 from datetime import datetime
-from database import get_supabase_client, get_admin_client
+from database import get_admin_client
+from services.auth_deps import get_current_user, AuthedUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -21,78 +22,83 @@ class NotificationResponse(BaseModel):
 
 
 @router.get("")
-async def get_notifications(user_id: str):
-    """Get all notifications for a user by user_id query param."""
+async def get_notifications(caller: AuthedUser = Depends(get_current_user)):
+    """Get all notifications for the authenticated caller."""
     try:
-        # Use admin client to bypass RLS
         db = get_admin_client()
         result = db.table("notifications")\
             .select("*")\
-            .eq("user_id", user_id)\
+            .eq("user_id", caller.id)\
             .order("created_at", desc=True)\
             .execute()
-        
+
         return {"notifications": result.data or []}
-    
+
     except Exception as e:
         logger.error(f"Error fetching notifications: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch notifications")
 
 
 @router.get("/me")
-async def get_my_notifications(user_id: str):
+async def get_my_notifications(caller: AuthedUser = Depends(get_current_user)):
     """Get all notifications for the logged-in user."""
     try:
-        # Use admin client to bypass RLS
         db = get_admin_client()
         result = db.table("notifications")\
             .select("*")\
-            .eq("user_id", user_id)\
+            .eq("user_id", caller.id)\
             .order("created_at", desc=True)\
             .execute()
-        
+
         return {"notifications": result.data or []}
-    
+
     except Exception as e:
         logger.error(f"Error fetching notifications: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch notifications")
 
 
 @router.get("/unread-count")
-async def get_unread_count(user_id: str):
-    """Get count of unread notifications."""
+async def get_unread_count(caller: AuthedUser = Depends(get_current_user)):
+    """Get count of unread notifications for the authenticated caller."""
     try:
-        # Use admin client to bypass RLS
         db = get_admin_client()
         result = db.table("notifications")\
             .select("id", count="exact")\
-            .eq("user_id", user_id)\
+            .eq("user_id", caller.id)\
             .eq("read", False)\
             .execute()
-        
+
         return {"unread_count": result.count or 0}
-    
+
     except Exception as e:
         logger.error(f"Error counting notifications: {e}")
         return {"unread_count": 0}
 
 
 @router.patch("/{notification_id}/mark-read")
-async def mark_notification_read(notification_id: str):
-    """Mark a notification as read."""
+async def mark_notification_read(
+    notification_id: str, caller: AuthedUser = Depends(get_current_user)
+):
+    """Mark a notification as read. Only the owning user may do this."""
     try:
-        # Use admin client to bypass RLS
         db = get_admin_client()
+
+        existing = db.table("notifications").select("user_id").eq("id", notification_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        if existing.data[0].get("user_id") != caller.id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this notification")
+
         result = db.table("notifications")\
             .update({"read": True})\
             .eq("id", notification_id)\
             .execute()
-        
+
         if not result.data:
             raise HTTPException(status_code=404, detail="Notification not found")
-        
+
         return {"message": "Notification marked as read"}
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -100,18 +106,14 @@ async def mark_notification_read(notification_id: str):
         raise HTTPException(status_code=500, detail="Failed to update notification")
 
 
-class MarkAllReadRequest(BaseModel):
-    user_id: str
-
-
 @router.post("/mark-all-read")
-async def mark_all_read(request: MarkAllReadRequest):
-    """Mark all notifications as read for a user."""
+async def mark_all_read(caller: AuthedUser = Depends(get_current_user)):
+    """Mark all notifications as read for the authenticated caller."""
     try:
         db = get_admin_client()
         db.table("notifications")\
             .update({"read": True})\
-            .eq("user_id", request.user_id)\
+            .eq("user_id", caller.id)\
             .eq("read", False)\
             .execute()
 

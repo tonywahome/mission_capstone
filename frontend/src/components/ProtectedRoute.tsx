@@ -32,7 +32,7 @@ export default function ProtectedRoute({
       // Redirect to appropriate page based on role
       if (user.role === "steward") {
         router.push("/scan");
-      } else if (user.role === "verifier_analyst") {
+      } else if (user.role === "analyst") {
         router.push("/landowner/pending-scans");
       } else {
         router.push("/");

@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase";
+
 // Empty string so all calls use relative paths (/api/...) which are proxied
 // to the backend via the rewrites in next.config.js.
 const API_URL = "";
@@ -6,9 +8,21 @@ async function fetchAPI<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string>),
+  };
+  if (session) {
+    headers["Authorization"] = `Bearer ${session.access_token}`;
+  }
+
   const res = await fetch(`${API_URL}${endpoint}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
+    headers,
   });
 
   if (!res.ok) {
@@ -24,16 +38,24 @@ export const api = {
   runScan: (data: {
     plot_id?: string;
     geometry?: object;
-    owner_id: string;
+    owner_id?: string; // research_admin only — scan on behalf of a steward
     registration_request_id?: string;
   }) => fetchAPI("/api/scan", { method: "POST", body: JSON.stringify(data) }),
 
   getScan: (scanId: string) => fetchAPI(`/api/scan/${scanId}`),
 
-  // Plots
-  getPlots: () => fetchAPI("/api/plots"),
-  getPlotsGeoJSON: () => fetchAPI("/api/plots/geojson"),
-  getPlot: (plotId: string) => fetchAPI(`/api/plots/${plotId}`),
+  submitScanForReview: (data: {
+    scan_id: string;
+    plot_id?: string | null;
+    owner_id?: string; // research_admin only — matches runScan's override path
+    tco2e: number;
+    integrity_score: number;
+    risk_score: number;
+  }) =>
+    fetchAPI("/api/scan/submit-review", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // NOTE: Credits/Transactions/Certificates/Dashboard-footprint functions
   // (getCredits, getCredit, getCreditStats, createCredit, updateCreditStatus,
@@ -44,25 +66,25 @@ export const api = {
   // prototype's backend (see backend/main.py) and had zero live call sites.
   // See backend/legacy/ and frontend/legacy/ for the preserved marketplace code.
 
+  // Plots
+  getPlots: () => fetchAPI("/api/plots"),
+  getPlotsGeoJSON: () => fetchAPI("/api/plots/geojson"),
+  getPlot: (plotId: string) => fetchAPI(`/api/plots/${plotId}`),
+
   // Notifications
-  getNotifications: (userId: string) =>
-    fetchAPI(`/api/notifications/me?user_id=${userId}`),
-  getUnreadCount: (userId: string) =>
-    fetchAPI(`/api/notifications/unread-count?user_id=${userId}`),
+  getNotifications: () => fetchAPI(`/api/notifications/me`),
+  getUnreadCount: () => fetchAPI(`/api/notifications/unread-count`),
   markNotificationRead: (notificationId: string) =>
     fetchAPI(`/api/notifications/${notificationId}/mark-read`, {
       method: "PATCH",
     }),
-  markAllRead: (userId: string) =>
-    fetchAPI(`/api/notifications/mark-all-read`, {
-      method: "POST",
-      body: JSON.stringify({ user_id: userId }),
-    }),
+  markAllRead: () =>
+    fetchAPI(`/api/notifications/mark-all-read`, { method: "POST" }),
 
   // Monitoring
   getPlotsByOwner: (ownerId: string) => fetchAPI(`/api/plots/owner/${ownerId}`),
-  deletePlot: (plotId: string, ownerId: string) =>
-    fetchAPI(`/api/plots/${plotId}?owner_id=${ownerId}`, { method: "DELETE" }),
+  deletePlot: (plotId: string) =>
+    fetchAPI(`/api/plots/${plotId}`, { method: "DELETE" }),
   getLatestMonitoring: (plotId: string) => fetchAPI(`/api/monitoring/plots/${plotId}/latest`),
   getMonitoringHistory: (plotId: string, limit = 52) =>
     fetchAPI(`/api/monitoring/plots/${plotId}/history?limit=${limit}`),
@@ -75,15 +97,13 @@ export const api = {
     fetchAPI(`/api/monitoring/plots/${plotId}/change-detection?current_days=${currentDays}&baseline_days=${baselineDays}`),
 
   // Landowner - Pending Scans & Approval
-  getPendingScans: (userId: string) =>
-    fetchAPI(`/api/landowner/pending-scans?user_id=${userId}`),
-  getPlotScans: (plotId: string, userId: string) =>
-    fetchAPI(`/api/landowner/pending-scans?user_id=${userId}&plot_id=${plotId}`),
-  // District-scoped audit queue for verifier_analyst users — see
+  getPendingScans: () => fetchAPI(`/api/landowner/pending-scans`),
+  getPlotScans: (plotId: string) =>
+    fetchAPI(`/api/landowner/pending-scans?plot_id=${plotId}`),
+  // District-scoped audit queue for analyst users — see
   // backend/routers/landowner.py's /verification-queue endpoint. Distinct
-  // from getPendingScans, which is owner_id-scoped for stewards.
-  getVerificationQueue: (verifierId: string) =>
-    fetchAPI(`/api/landowner/verification-queue?verifier_id=${verifierId}`),
+  // from getPendingScans, which is owner-scoped for stewards.
+  getVerificationQueue: () => fetchAPI(`/api/landowner/verification-queue`),
   approveListing: (creditId: string, approved: boolean, rejectionReason?: string) =>
     fetchAPI("/api/landowner/approve-listing", {
       method: "POST",
@@ -93,18 +113,41 @@ export const api = {
         rejection_reason: rejectionReason,
       }),
     }),
-  getMyCredits: (userId: string) =>
-    fetchAPI(`/api/landowner/my-credits?user_id=${userId}`),
+  unsubmitScan: (creditId: string) =>
+    fetchAPI("/api/landowner/unsubmit", {
+      method: "POST",
+      body: JSON.stringify({ credit_id: creditId }),
+    }),
+  getMyCredits: () => fetchAPI(`/api/landowner/my-credits`),
 
   // Registration requests (admin review)
-  approveRegistrationRequest: (requestId: string, reviewerId?: string) =>
+  submitRegistrationRequest: (data: {
+    owner_name: string;
+    owner_email: string;
+    land_location: string;
+    land_size: string;
+    land_type: string;
+    coordinates?: { lat: number; lon: number };
+    boundaries?: number[][];
+    geometry?: object;
+    additional_info?: string;
+  }) =>
+    fetchAPI("/api/registration/request", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getPlotForRegistrationRequest: (requestId: string) =>
+    fetchAPI(`/api/registration/requests/${requestId}/plot`),
+  getRegistrationRequests: (status?: "pending" | "approved" | "rejected") =>
+    fetchAPI(`/api/registration/requests${status ? `?status=${status}` : ""}`),
+  approveRegistrationRequest: (requestId: string) =>
     fetchAPI(`/api/registration/requests/${requestId}/approve`, {
       method: "POST",
-      body: JSON.stringify({ reviewer_id: reviewerId }),
+      body: JSON.stringify({}),
     }),
-  rejectRegistrationRequest: (requestId: string, reviewerId?: string, rejectionReason?: string) =>
+  rejectRegistrationRequest: (requestId: string, rejectionReason?: string) =>
     fetchAPI(`/api/registration/requests/${requestId}/reject`, {
       method: "POST",
-      body: JSON.stringify({ reviewer_id: reviewerId, rejection_reason: rejectionReason }),
+      body: JSON.stringify({ rejection_reason: rejectionReason }),
     }),
 };

@@ -39,6 +39,7 @@ const STATUS_STYLES: Record<string, { bg: string; border: string; text: string; 
   pending_review:   { bg: "bg-amber-50",   border: "border-amber-200",   text: "text-amber-800",   dot: "bg-amber-500 animate-pulse", label: "Awaiting verification" },
   verified:         { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-800", dot: "bg-emerald-500",             label: "Verified — in audit trail" },
   flagged:          { bg: "bg-red-50",     border: "border-red-200",     text: "text-red-800",     dot: "bg-red-500",                 label: "Flagged" },
+  withdrawn:        { bg: "bg-gray-50",    border: "border-gray-200",    text: "text-gray-700",    dot: "bg-gray-400",                label: "Withdrawn" },
   listed:           { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-800", dot: "bg-emerald-500",             label: "Listed on registry (legacy)" },
   rejected:         { bg: "bg-red-50",     border: "border-red-200",     text: "text-red-800",     dot: "bg-red-500",                 label: "Rejected (legacy)" },
   sold:             { bg: "bg-terra-50",   border: "border-terra-200",   text: "text-terra-800",   dot: "bg-terra-500",               label: "Sold (legacy)" },
@@ -87,14 +88,21 @@ function Metric({ label, value }: { label: string; value: string }) {
 function ScanCard({
   scan,
   plotMode,
+  canVerify,
   onApprove,
   onReject,
+  onUnsubmit,
   processing,
 }: {
   scan: PendingScan;
   plotMode: boolean;
+  // true for analyst / research_admin — only they may verify or
+  // flag a record. A steward reviewing their own pending submission gets
+  // an "Unsubmit" action instead (see onUnsubmit).
+  canVerify: boolean;
   onApprove: (id: string) => void;
   onReject: (scan: PendingScan) => void;
+  onUnsubmit: (scan: PendingScan) => void;
   processing: boolean;
 }) {
   const date = new Date(scan.scan_date).toLocaleDateString("en-GB", {
@@ -166,26 +174,37 @@ function ScanCard({
 
         {/* Actions — only for pending credits */}
         {isPending ? (
-          <div className="flex gap-3">
+          canVerify ? (
+            <div className="flex gap-3">
+              <button
+                onClick={() => onApprove(scan.credit_id)}
+                disabled={processing}
+                className="flex-1 py-2.5 rounded-xl bg-terra-700 text-white text-sm font-semibold hover:bg-terra-800 disabled:opacity-50 transition-colors"
+              >
+                Verify & confirm
+              </button>
+              <button
+                onClick={() => onReject(scan)}
+                disabled={processing}
+                className="flex-1 py-2.5 rounded-xl border-2 border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 disabled:opacity-50 transition-colors"
+              >
+                Flag record
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={() => onApprove(scan.credit_id)}
+              onClick={() => onUnsubmit(scan)}
               disabled={processing}
-              className="flex-1 py-2.5 rounded-xl bg-terra-700 text-white text-sm font-semibold hover:bg-terra-800 disabled:opacity-50 transition-colors"
+              className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition-colors"
             >
-              Verify & confirm
+              Unsubmit
             </button>
-            <button
-              onClick={() => onReject(scan)}
-              disabled={processing}
-              className="flex-1 py-2.5 rounded-xl border-2 border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 disabled:opacity-50 transition-colors"
-            >
-              Flag record
-            </button>
-          </div>
+          )
         ) : (
           <div className={`rounded-xl px-4 py-2.5 text-sm font-medium text-center ${st.bg} ${st.text} border ${st.border}`}>
             {scan.status === "verified"  && "This record has been verified and added to the audit trail"}
             {scan.status === "flagged"   && "This record was flagged during verification"}
+            {scan.status === "withdrawn" && "You withdrew this submission before review"}
             {scan.status === "listed"    && "This credit is listed on the carbon registry (legacy)"}
             {scan.status === "sold"      && "This credit has been sold (legacy)"}
             {scan.status === "rejected"  && "This listing was rejected (legacy)"}
@@ -202,10 +221,14 @@ function PendingScansContent() {
   const plotId = searchParams.get("plot_id");
 
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-  // verifier_analyst reviews other stewards' pending records via the
+  // analyst reviews other stewards' pending records via the
   // district-scoped /verification-queue endpoint, not the owner-scoped
   // /pending-scans endpoint stewards (and a plot drill-down view) use.
-  const isVerifier = user?.role === "verifier_analyst";
+  const isVerifier = user?.role === "analyst";
+  // Only an analyst or research_admin may verify/flag a record —
+  // a steward reviewing their own pending submission gets "Unsubmit"
+  // instead (see ScanCard's canVerify prop).
+  const canVerify = isVerifier || user?.role === "research_admin";
   const [scans, setScans] = useState<PendingScan[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -225,11 +248,11 @@ function PendingScansContent() {
     try {
       let res: { pending_scans: PendingScan[] };
       if (plotId) {
-        res = await api.getPlotScans(plotId, user.id) as { pending_scans: PendingScan[] };
+        res = await api.getPlotScans(plotId) as { pending_scans: PendingScan[] };
       } else if (isVerifier) {
-        res = await api.getVerificationQueue(user.id) as { pending_scans: PendingScan[] };
+        res = await api.getVerificationQueue() as { pending_scans: PendingScan[] };
       } else {
-        res = await api.getPendingScans(user.id) as { pending_scans: PendingScan[] };
+        res = await api.getPendingScans() as { pending_scans: PendingScan[] };
       }
       setScans(res.pending_scans || []);
     } catch {
@@ -254,6 +277,24 @@ function PendingScansContent() {
       showToast("success", "Record verified and added to the audit trail.");
     } catch (e: any) {
       showToast("error", e.message || "Failed to verify record");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleUnsubmit = async (scan: PendingScan) => {
+    if (!window.confirm(`Withdraw the submission for ${scan.plot_name}? You can submit a new scan for this plot afterwards.`)) {
+      return;
+    }
+    setProcessing(true);
+    try {
+      await api.unsubmitScan(scan.credit_id);
+      setScans(prev => prev.map(s =>
+        s.credit_id === scan.credit_id ? { ...s, status: "withdrawn" } : s
+      ));
+      showToast("success", "Submission withdrawn.");
+    } catch (e: any) {
+      showToast("error", e.message || "Failed to withdraw submission");
     } finally {
       setProcessing(false);
     }
@@ -374,8 +415,10 @@ function PendingScansContent() {
                 key={scan.credit_id}
                 scan={scan}
                 plotMode={!!plotId}
+                canVerify={canVerify}
                 onApprove={handleApprove}
                 onReject={setRejectTarget}
+                onUnsubmit={handleUnsubmit}
                 processing={processing}
               />
             ))}

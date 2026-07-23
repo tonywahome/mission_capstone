@@ -14,8 +14,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Any
 
-from fastapi import APIRouter, HTTPException, Query
-from database import get_supabase_client, get_admin_client
+from fastapi import APIRouter, Depends, HTTPException, Query
+from database import get_admin_client
+from services.auth_deps import get_current_user, require_role, AuthedUser
 from ml.monitor_biomass import (
     analyze_plot_monitoring_data,
     fetch_current_ndvi_from_gee,
@@ -26,6 +27,20 @@ from ml.monitor_biomass import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
+
+CROSS_OWNER_ROLES = ("analyst", "research_admin")
+
+
+def _require_plot_access(plot_id: str, caller: AuthedUser, db) -> dict:
+    """Fetch a plot and 403 unless the caller owns it or holds a
+    cross-owner role. Returns the plot row on success."""
+    result = db.table("land_plots").select("*").eq("id", plot_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Plot not found")
+    plot = result.data[0]
+    if caller.id != plot.get("owner_id") and caller.role not in CROSS_OWNER_ROLES:
+        raise HTTPException(status_code=403, detail="Not authorized to access this plot")
+    return plot
 
 
 # ── Helper: run a single plot monitoring check ────────────────────────────────
@@ -151,9 +166,10 @@ async def _run_plot_check(plot_id: str, db) -> Optional[dict]:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/plots/{plot_id}/latest")
-async def get_latest_report(plot_id: str):
+async def get_latest_report(plot_id: str, caller: AuthedUser = Depends(get_current_user)):
     """Return the most recent monitoring report for a plot."""
     db = get_admin_client()
+    _require_plot_access(plot_id, caller, db)
     try:
         result = (
             db.table("monitoring_reports")
@@ -176,9 +192,11 @@ async def get_latest_report(plot_id: str):
 async def get_report_history(
     plot_id: str,
     limit: int = Query(default=52, le=200),  # 52 weeks = 1 year by default
+    caller: AuthedUser = Depends(get_current_user),
 ):
     """Return all monitoring reports for a plot, newest first."""
     db = get_admin_client()
+    _require_plot_access(plot_id, caller, db)
     try:
         result = (
             db.table("monitoring_reports")
@@ -194,9 +212,10 @@ async def get_report_history(
 
 
 @router.post("/plots/{plot_id}/run")
-async def run_monitoring_for_plot(plot_id: str):
+async def run_monitoring_for_plot(plot_id: str, caller: AuthedUser = Depends(get_current_user)):
     """Manually trigger a monitoring check for one plot."""
     db = get_admin_client()
+    _require_plot_access(plot_id, caller, db)
     report = await _run_plot_check(plot_id, db)
     if not report:
         raise HTTPException(status_code=404, detail="Plot not found or monitoring failed")
@@ -204,9 +223,12 @@ async def run_monitoring_for_plot(plot_id: str):
 
 
 @router.get("/summary")
-async def monitoring_summary():
+async def monitoring_summary(
+    caller: AuthedUser = Depends(require_role("analyst", "research_admin")),
+):
     """
     Dashboard summary: count of plots by alert level in the most recent weekly check.
+    Cross-owner aggregate — restricted to analyst/research_admin.
     """
     db = get_admin_client()
     try:
@@ -255,6 +277,7 @@ async def get_change_detection(
     plot_id: str,
     current_days:  int = Query(default=30,  ge=1,  le=90),
     baseline_days: int = Query(default=180, ge=30, le=365),
+    caller: AuthedUser = Depends(get_current_user),
 ):
     """
     Pixel-level change detection: compare the last `current_days` to the prior
@@ -262,15 +285,8 @@ async def get_change_detection(
     and per-zone area statistics.
     """
     db = get_admin_client()
-    try:
-        result = db.table("land_plots").select("geometry").eq("id", plot_id).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if not result.data:
-        raise HTTPException(status_code=404, detail="Plot not found")
-
-    geometry = result.data[0].get("geometry")
+    plot = _require_plot_access(plot_id, caller, db)
+    geometry = plot.get("geometry")
     if not geometry:
         raise HTTPException(status_code=422, detail="Plot has no geometry stored")
 
@@ -285,10 +301,11 @@ async def get_change_detection(
 
 
 @router.post("/run-all")
-async def run_all_plots():
+async def run_all_plots(caller: AuthedUser = Depends(require_role("research_admin"))):
     """
     Trigger the weekly monitoring run for all registered plots.
     Called automatically by the scheduler every Sunday; can also be invoked manually.
+    research_admin only.
     """
     db = get_admin_client()
     try:
@@ -337,21 +354,15 @@ async def run_all_plots():
 async def get_vegetation_tiles(
     plot_id: str,
     days_back: int = Query(default=30, ge=1, le=365),
+    caller: AuthedUser = Depends(get_current_user),
 ):
     """
     Return GEE raster tile URLs for spatial vegetation visualization.
     Tile URLs are Mapbox GL-compatible and cover NDVI, EVI, NBR, and False Color.
     """
     db = get_admin_client()
-    try:
-        result = db.table("land_plots").select("geometry").eq("id", plot_id).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if not result.data:
-        raise HTTPException(status_code=404, detail="Plot not found")
-
-    geometry = result.data[0].get("geometry")
+    plot = _require_plot_access(plot_id, caller, db)
+    geometry = plot.get("geometry")
     if not geometry:
         raise HTTPException(status_code=422, detail="Plot has no geometry stored")
 

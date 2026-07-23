@@ -23,9 +23,10 @@ proposal:
      Steward-scoping is enforced in routers/plots.py and routers/landowner.py
      via owner_id filtering. District-scoping for verifiers/analysts is
      implemented in routers/landowner.py's /verification-queue endpoint
-     using the users.assigned_district column (migration_capstone_rescope.sql).
-     `resolve_role` below is the shared mechanism both rely on to determine
-     whether a given caller is entitled to full precision.
+     using the caller's assigned_district (from their verified JWT
+     app_metadata — see backend/services/auth_deps.py). Full-precision
+     entitlement for the coordinate rounding below is determined the same
+     way, via auth_deps.get_current_user_optional.
 
 This module does NOT implement safeguards 3 (separate, explicitly-worded
 consent for precise-location storage — see `precise_location_consent` on
@@ -33,17 +34,12 @@ models/user.py and models/land_plot.py, already wired into the signup and
 registration flows) or 4 (defined retention period — see
 `users.data_retention_until` / `services/retention.py`).
 
-KNOWN LIMITATION: this codebase has no token/header-based auth *middleware*
-— there is no FastAPI `Depends` security scheme wired into the app, so
-nothing forces a caller to authenticate. `resolve_role` performs a real
-lookup against the existing `sessions` -> `users` tables (see
-backend/data/migration_add_auth.sql) when a bearer token is supplied, but
-each router must opt in by accepting a `token` query parameter and calling
-this function explicitly. A client that omits the token is simply treated
-as unauthenticated and gets the rounded/least-privilege view — this fails
-closed (toward more privacy), never open. Replacing this stopgap with real
-session-cookie or JWT middleware enforced at the FastAPI dependency-injection
-layer is documented as future work (see README "Known Limitations").
+Role resolution for the coordinate-rounding decision now goes through
+`backend/services/auth_deps.py`'s `get_current_user_optional`, which verifies
+a real Supabase Auth JWT (see backend/data/migration_supabase_auth.sql) —
+this module previously did its own `sessions` -> `users` token lookup
+(`resolve_role`/`resolve_role_name`), which has been removed now that the
+`sessions` table no longer exists.
 """
 from typing import Optional
 import copy
@@ -102,39 +98,3 @@ def apply_coordinate_rounding(
     if isinstance(plot, dict) and "geometry" in plot:
         plot = {**plot, "geometry": round_geojson_geometry(plot.get("geometry"), decimals)}
     return plot
-
-
-def resolve_role(token: Optional[str], db) -> Optional[str]:
-    """Best-effort role lookup from an opaque bearer token, using the
-    existing `sessions` -> `users` tables. Returns None — treated as
-    least-privilege / rounded-and-unscoped — for a missing token, an
-    unrecognised token, or any lookup failure. `db` should be an admin
-    client (RLS bypass), matching the pattern already used for session
-    lookups in routers/auth.py."""
-    if not token:
-        return None
-    try:
-        session_res = db.table("sessions").select("user_id").eq("token", token).execute()
-        if not session_res.data:
-            return None
-        user_id = session_res.data[0]["user_id"]
-        user_res = db.table("users").select("role, assigned_district").eq("id", user_id).execute()
-        if not user_res.data:
-            return None
-        return user_res.data[0]
-    except Exception as e:
-        logger.warning(
-            f"resolve_role: session/role lookup failed ({e}); "
-            "defaulting to rounded, unscoped access. If this is a missing-"
-            "column error, apply backend/data/migration_capstone_rescope.sql."
-        )
-        return None
-
-
-def resolve_role_name(token: Optional[str], db) -> Optional[str]:
-    """Convenience wrapper around resolve_role for callers that only need
-    the role string (e.g. plots.py's coordinate-rounding check)."""
-    user = resolve_role(token, db)
-    if not user:
-        return None
-    return user.get("role")

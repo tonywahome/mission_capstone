@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { api } from "@/lib/api";
 import mapboxgl from "mapbox-gl";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -151,28 +152,15 @@ function RequestRegistrationContent() {
     setError("");
 
     try {
-      const response = await fetch(
-        `/api/registration/request`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            owner_id: user?.id,
-            owner_name: user?.full_name,
-            owner_email: user?.email,
-            land_location: formData.landLocation,
-            land_size: formData.landSize,
-            land_type: formData.landType,
-            additional_info: formData.additionalInfo,
-            geometry: drawnGeometry,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new Error(errorBody?.detail || "Failed to submit request");
-      }
+      await api.submitRegistrationRequest({
+        owner_name: user?.full_name || "",
+        owner_email: user?.email || "",
+        land_location: formData.landLocation,
+        land_size: formData.landSize,
+        land_type: formData.landType,
+        additional_info: formData.additionalInfo,
+        geometry: drawnGeometry,
+      });
 
       setSuccess(true);
       setFormData({

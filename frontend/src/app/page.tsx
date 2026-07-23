@@ -98,7 +98,7 @@ export default function Home() {
             <Pillar
               step="02"
               title="Independent verification"
-              body="Every biomass estimate carries a 90% prediction interval. A Verifier-Analyst reviews each submission and confirms or flags it before it enters the project's audit trail."
+              body="Every biomass estimate carries a 90% prediction interval. An Analyst reviews each submission and confirms or flags it before it enters the project's audit trail."
             />
             <Pillar
               step="03"
@@ -132,7 +132,7 @@ export default function Home() {
             />
             <RoleCard
               icon="🔎"
-              title="Verifier-Analysts"
+              title="Analysts"
               body="Review submitted scans and field data, confirm or flag records, and maintain the project's audit trail."
               cta="Request analyst access"
               href="/signup"

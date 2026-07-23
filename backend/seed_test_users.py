@@ -23,7 +23,7 @@ def seed_test_users():
             "email": "verifier@terrafoma.local",
             "password": "password123",
             "full_name": "Verifier Analyst",
-            "role": "verifier_analyst",
+            "role": "analyst",
         },
         {
             "email": "admin@terrafoma.local",

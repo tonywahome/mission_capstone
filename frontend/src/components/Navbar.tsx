@@ -40,14 +40,16 @@ export default function Navbar() {
         { href: "/landowner/pending-scans", label: "My submissions" },
         { href: "/request-registration", label: "Register project" },
       ];
-    if (user.role === "verifier_analyst")
+    if (user.role === "analyst")
       return [
         ...base,
+        { href: "/landowner", label: "Dashboard" },
         { href: "/landowner/pending-scans", label: "Verification queue" },
       ];
     if (user.role === "research_admin")
       return [
         ...base,
+        { href: "/landowner", label: "Dashboard" },
         { href: "/admin/requests", label: "Registrations" },
         { href: "/scan", label: "Scan" },
         { href: "/landowner/pending-scans", label: "Audit trail" },
@@ -176,7 +178,7 @@ export default function Navbar() {
                               ? "Land Steward"
                               : user.role === "research_admin"
                                 ? "Research Administrator"
-                                : "Verifier / Analyst"}
+                                : "Analyst"}
                           </span>
                         </div>
                         <div className="p-2">

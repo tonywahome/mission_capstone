@@ -1,14 +1,15 @@
 import uuid
 import logging
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from models.risk import ScanRequest, ScanResponse
 from services.biomass_estimator import predict_biomass_from_features, biomass_to_tco2e, calculate_integrity_score
 from services.risk_scorer import calculate_risk_score, get_weather_data
 from services.gee_feature_extractor import extract_sentinel_features
 from services.carbon_calculator import calculate_credit_price
 from services.location_service import get_location_from_geometry, get_centroid_from_geometry
-from database import get_supabase_client, get_admin_client
+from services.auth_deps import get_current_user, AuthedUser
+from database import get_admin_client
 import random
 
 logger = logging.getLogger(__name__)
@@ -22,14 +23,21 @@ def estimate_vegetation_cover_pct(ndvi: float, evi: float) -> float:
 
 
 @router.post("", response_model=ScanResponse)
-async def run_scan(request: ScanRequest):
-    logger.info(f"Processing scan request for owner: {request.owner_id}")
+async def run_scan(request: ScanRequest, caller: AuthedUser = Depends(get_current_user)):
+    if caller.role not in ("steward", "research_admin"):
+        raise HTTPException(status_code=403, detail="Only stewards can run a scan")
+
+    # A research_admin may scan on behalf of a steward by passing an
+    # explicit owner_id; any other caller always scans as themselves,
+    # regardless of what the request body says.
+    owner_id = (
+        request.owner_id
+        if caller.role == "research_admin" and request.owner_id
+        else caller.id
+    )
+    logger.info(f"Processing scan request for owner: {owner_id}")
     registration_request_id = request.registration_request_id
-    
-    # Convert "demo-user" string to proper UUID
-    DEMO_USER_UUID = "00000000-0000-0000-0000-000000000001"
-    owner_id = DEMO_USER_UUID if request.owner_id == "demo-user" else request.owner_id
-    
+
     # Extract location from geometry
     location = get_location_from_geometry(request.geometry)
     logger.info(f"Extracted location: {location}")
@@ -38,7 +46,7 @@ async def run_scan(request: ScanRequest):
     plot = None
     plot_id = request.plot_id
     try:
-        db = get_supabase_client()
+        db = get_admin_client()
         if request.plot_id:
             result = db.table("land_plots").select("*").eq("id", request.plot_id).execute()
             if result.data:
@@ -125,17 +133,20 @@ async def run_scan(request: ScanRequest):
             }
             try:
                 result = db.table("land_plots").insert(new_plot).execute()
-                if result.data:
-                    plot = result.data[0]
-                    plot_id = plot["id"]
-                    logger.info(f"Created new plot {plot_id} at {location}")
-                else:
-                    plot_id = new_plot_id
-                    logger.warning(f"Failed to insert plot but assigning generated ID {plot_id}")
+                if not result.data:
+                    logger.error(f"land_plots insert for {new_plot_id} returned no data")
+                    raise HTTPException(status_code=500, detail="Failed to create land plot record")
+                plot = result.data[0]
+                plot_id = plot["id"]
+                logger.info(f"Created new plot {plot_id} at {location}")
+            except HTTPException:
+                raise
             except Exception as plot_insert_err:
-                plot_id = new_plot_id
-                logger.warning(f"Failed to insert plot to database: {plot_insert_err}, using generated ID {plot_id}")
+                logger.error(f"Failed to insert plot to database: {plot_insert_err}")
+                raise HTTPException(status_code=500, detail="Failed to create land plot record")
 
+    except HTTPException:
+        raise
     except Exception as e:
         # Database not configured, use defaults
         logger.warning(f"Database not available: {e}")
@@ -246,7 +257,7 @@ async def run_scan(request: ScanRequest):
         "raw_bands": raw_bands,
     }
     try:
-        db = get_supabase_client()
+        db = get_admin_client()
         try:
             db.table("scan_results").insert(scan_record).execute()
             logger.info(f"Saved scan result {scan_id} to database")
@@ -265,8 +276,12 @@ async def run_scan(request: ScanRequest):
                 "model_version": scan_record["model_version"],
                 "raw_bands": scan_record["raw_bands"],
             }
-            db.table("scan_results").insert(fallback_record).execute()
-            logger.info(f"Saved scan result {scan_id} using fallback schema")
+            try:
+                db.table("scan_results").insert(fallback_record).execute()
+                logger.info(f"Saved scan result {scan_id} using fallback schema")
+            except Exception as fallback_insert_err:
+                logger.error(f"Failed to save scan result {scan_id} even with fallback schema: {fallback_insert_err}")
+                raise HTTPException(status_code=500, detail="Failed to save scan result")
         
         # Create an interim verification record from the scan result, status
         # 'pending_approval' (awaiting Verifier-Analyst review). This still
@@ -292,8 +307,9 @@ async def run_scan(request: ScanRequest):
             db.table("carbon_credits").insert(credit_record).execute()
             logger.info(f"Created carbon credit {credit_id} with pending_approval status")
         except Exception as credit_err:
-            logger.error(f"Failed to create carbon credit {credit_id}: {credit_err}")
-            # Create a fallback record with minimal fields
+            logger.warning(f"Failed to create carbon credit with full schema, retrying with minimal fields: {credit_err}")
+            # Retry with minimal fields, in case a newer column doesn't
+            # exist yet on this project (e.g. migration not yet applied).
             try:
                 fallback_credit = {
                     "id": credit_id,
@@ -306,7 +322,8 @@ async def run_scan(request: ScanRequest):
                 db.table("carbon_credits").insert(fallback_credit).execute()
                 logger.info(f"Created fallback carbon credit {credit_id}")
             except Exception as fallback_err:
-                logger.error(f"Failed to create fallback carbon credit: {fallback_err}")
+                logger.error(f"Failed to create fallback carbon credit {credit_id}: {fallback_err}")
+                raise HTTPException(status_code=500, detail="Failed to create carbon credit record")
         
         # Audit trail — required for dMRV transparency (proposal Section 3.3)
         try:
@@ -388,6 +405,8 @@ async def run_scan(request: ScanRequest):
             except Exception as e:
                 logger.warning(f"Failed to update registration request: {e}")
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Failed to save scan to DB: {e}")
 
@@ -412,12 +431,17 @@ async def run_scan(request: ScanRequest):
 
 
 @router.post("/submit-review")
-async def submit_scan_for_review(data: dict):
+async def submit_scan_for_review(data: dict, caller: AuthedUser = Depends(get_current_user)):
     """Submit a completed scan for verifier review."""
     try:
         scan_id = data.get("scan_id")
         plot_id = data.get("plot_id")
-        owner_id = data.get("owner_id")
+        requested_owner_id = data.get("owner_id")
+        owner_id = (
+            requested_owner_id
+            if caller.role == "research_admin" and requested_owner_id
+            else caller.id
+        )
         tco2e = data.get("tco2e")
         integrity_score = data.get("integrity_score")
         risk_score = data.get("risk_score")
@@ -430,7 +454,7 @@ async def submit_scan_for_review(data: dict):
 
         if not plot_id:
             logger.warning(f"plot_id is None for scan {scan_id}, attempting to fetch from scan_results")
-            db = get_supabase_client()
+            db = get_admin_client()
             result = db.table("scan_results").select("plot_id").eq("id", scan_id).execute()
             if result.data:
                 plot_id = result.data[0].get("plot_id")
@@ -440,51 +464,34 @@ async def submit_scan_for_review(data: dict):
                 plot_id = str(uuid.uuid4())
                 logger.warning(f"Could not determine plot_id for scan {scan_id}, generating fallback ID: {plot_id}")
 
-        db = get_supabase_client()
         admin_db = get_admin_client()
 
         logger.info(f"Scan {scan_id} submitted for review")
 
-        # Create a verification record for the verifier/analyst to review
+        # NOTE: the `verifications` table (migration_capstone_rescope.sql)
+        # is a schema-only scaffold for the proposal's Section 3.4
+        # Verification entity — its columns (credit_id, plot_id,
+        # verifier_id, district, decision, notes, reviewed_at) don't match
+        # what this endpoint would need to write at submit time (decision/
+        # verifier_id aren't known yet; that only happens later at
+        # approve-listing). The real verification-workflow status already
+        # lives on carbon_credits.status (see routers/landowner.py's
+        # approve-listing, and README's "Known Limitations"), so no insert
+        # into `verifications` happens here — a generated id is returned
+        # below purely for the response shape, not persisted anywhere.
         verification_id = str(uuid.uuid4())
-        verification_record = {
-            "id": verification_id,
-            "scan_id": scan_id,
-            "plot_id": plot_id,
-            "owner_id": owner_id,
-            "status": "pending_verification",
-            "tco2e": tco2e,
-            "integrity_score": integrity_score,
-            "risk_score": risk_score,
-            "created_at": datetime.now().isoformat(),
-        }
-        try:
-            admin_db.table("verifications").insert(verification_record).execute()
-            logger.info(f"Created verification record {verification_id} for scan {scan_id}")
-        except Exception as verify_err:
-            logger.warning(f"Failed to create verification record (non-fatal): {verify_err}")
 
-        # Notify verifier/analyst that there's a scan awaiting review
-        notification_data = {
-            "user_id": "verifier-group",  # Notify all verifiers
-            "type": "scan_pending_verification",
-            "title": "New Scan Awaiting Verification",
-            "message": f"A new scan (ID: {scan_id[:8]}) has been submitted for verification. Estimated tCO2e: {tco2e:.2f}",
-            "data": {
-                "scan_id": scan_id,
-                "verification_id": verification_id,
-                "plot_id": plot_id,
-                "owner_id": owner_id,
-                "tco2e": tco2e,
-                "integrity_score": integrity_score,
-                "risk_score": risk_score,
-            }
-        }
-        try:
-            admin_db.table("notifications").insert(notification_data).execute()
-            logger.info(f"Created notification for verifiers about scan {scan_id}")
-        except Exception as notif_err:
-            logger.warning(f"Failed to create notification (non-fatal): {notif_err}")
+        # NOTE: there is no real "notify all verifiers" fan-out mechanism in
+        # this codebase — role lives in auth.users.app_metadata, which isn't
+        # queryable from the `profiles` table alone, so there is no list of
+        # analyst user ids to notify here. A prior version of this
+        # code inserted a placeholder row with user_id="verifier-group" (not
+        # a real UUID) and type="scan_pending_verification" (not in the
+        # notifications.type CHECK constraint) — that insert could never
+        # succeed and has been removed rather than patched, since there is no
+        # correct target to notify yet. Verifiers currently discover pending
+        # scans via the verification queue (GET /api/landowner/verification-queue).
+        logger.info(f"Scan {scan_id} queued for verifier review (no per-verifier notification fan-out yet)")
 
         return {
             "message": "Scan submitted for review successfully",
@@ -557,9 +564,20 @@ TerraFoma Carbon Credit Platform
 
 
 @router.get("/{scan_id}")
-async def get_scan(scan_id: str):
-    db = get_supabase_client()
+async def get_scan(scan_id: str, caller: AuthedUser = Depends(get_current_user)):
+    db = get_admin_client()
     result = db.table("scan_results").select("*").eq("id", scan_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return result.data[0]
+    scan = result.data[0]
+
+    owner_id = None
+    if scan.get("plot_id"):
+        plot_res = db.table("land_plots").select("owner_id").eq("id", scan["plot_id"]).execute()
+        if plot_res.data:
+            owner_id = plot_res.data[0].get("owner_id")
+
+    if caller.role not in ("analyst", "research_admin") and caller.id != owner_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this scan")
+
+    return scan

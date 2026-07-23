@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT UNIQUE NOT NULL,
   full_name     TEXT NOT NULL,
   password_hash TEXT,
-  role          TEXT NOT NULL CHECK (role IN ('steward', 'verifier_analyst', 'research_admin')),
+  role          TEXT NOT NULL CHECK (role IN ('steward', 'analyst', 'research_admin')),
   company_name  TEXT,
   precise_location_consent BOOLEAN NOT NULL DEFAULT FALSE,
   created_at    TIMESTAMPTZ DEFAULT now(),

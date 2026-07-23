@@ -20,7 +20,10 @@ class RiskAssessmentResponse(RiskAssessment):
 class ScanRequest(BaseModel):
     plot_id: Optional[str] = None
     geometry: Optional[dict] = None  # GeoJSON Polygon
-    owner_id: str
+    # Defaults to the authenticated caller. A research_admin may set this
+    # explicitly to scan on behalf of a steward (see routers/scan.py) — any
+    # other role attempting to set it is ignored server-side.
+    owner_id: Optional[str] = None
     registration_request_id: Optional[str] = None  # Link to registration request
 
 

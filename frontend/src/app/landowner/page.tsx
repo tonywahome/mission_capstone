@@ -229,12 +229,12 @@ export default function LandownerDashboard() {
     try {
       const [plotsData, notifRes, pendingRes] = await Promise.allSettled([
         api.getPlotsByOwner(user.id),
-        fetch(`/api/notifications?user_id=${user.id}`),
-        api.getPendingScans(user.id),
+        api.getNotifications(),
+        api.getPendingScans(),
       ]);
       if (plotsData.status === "fulfilled") setPlots(plotsData.value as PlotWithMonitoring[]);
-      if (notifRes.status === "fulfilled" && (notifRes.value as Response).ok) {
-        const d = await (notifRes.value as Response).json();
+      if (notifRes.status === "fulfilled") {
+        const d = notifRes.value as any;
         setNotifications(d.notifications || []);
       }
       if (pendingRes.status === "fulfilled") {
@@ -250,7 +250,7 @@ export default function LandownerDashboard() {
 
   const handleDeletePlot = async (plotId: string) => {
     if (!user?.id) return;
-    await api.deletePlot(plotId, user.id);
+    await api.deletePlot(plotId);
     setPlots(prev => prev.filter(p => p.id !== plotId));
   };
 
