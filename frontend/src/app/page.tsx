@@ -30,7 +30,7 @@ export default function Home() {
             </h1>
 
             <p className="animate-fade-up-delay-1 text-lg md:text-xl text-white/80 mt-7 max-w-2xl mx-auto leading-relaxed drop-shadow">
-              Rwanda's continuous, satellite-driven Monitoring, Reporting and
+              Rwanda&apos;s continuous, satellite-driven Monitoring, Reporting and
               Verification platform for green projects
             </p>
 

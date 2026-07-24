@@ -151,7 +151,7 @@ function PlotCard({
         {/* Delete confirmation */}
         {confirming ? (
           <div className="bg-red-50 border border-red-200 rounded-xl p-3 mt-2">
-            <p className="text-sm font-bold text-red-800 mb-1">Delete "{plot.name}"?</p>
+            <p className="text-sm font-bold text-red-800 mb-1">Delete &quot;{plot.name}&quot;?</p>
             <p className="text-xs text-red-600 mb-3">
               All scans and monitoring reports will be removed permanently.
               Plots with a record pending verification or already verified cannot be deleted.

@@ -93,19 +93,34 @@ ADD COLUMN IF NOT EXISTS details JSONB;
 -- (backend/routers/monitoring.py, backend/routers/plots.py). Not created
 -- by any prior migration file in this repo — defined here from the
 -- columns backend/routers/monitoring.py and plots.py actually read/write.
+--
+-- NOTE (see migration_fix_monitoring_reports.sql): the column list below
+-- was originally written against an earlier draft of the monitoring
+-- pipeline. ml/monitor_biomass.py's analyze_plot_monitoring_data() and
+-- routers/monitoring.py's _run_plot_check() were later rewritten to
+-- produce a different report shape (current_ndvi/baseline_ndvi/delta_ndvi/
+-- z_score/classification/cause/explanation/recommendation/spectral_context/
+-- data_quality) without this CREATE TABLE being updated to match, so on
+-- any database where this migration already ran, every monitoring-report
+-- insert silently fails schema validation (caught by the router's broad
+-- try/except) and /api/monitoring/plots/{id}/latest|history never returns
+-- data. Fixed here for fresh installs; migration_fix_monitoring_reports.sql
+-- ALTERs already-migrated databases additively (no columns dropped).
 CREATE TABLE IF NOT EXISTS monitoring_reports (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   plot_id UUID REFERENCES land_plots(id) ON DELETE CASCADE,
   check_date TIMESTAMPTZ DEFAULT now(),
-  mean_ndvi FLOAT,
-  mean_evi FLOAT,
-  vegetation_cover_pct FLOAT,
-  biomass_estimate FLOAT,
-  change_detected BOOLEAN DEFAULT FALSE,
-  change_type TEXT,
-  change_magnitude_pct FLOAT,
+  current_ndvi FLOAT,
+  baseline_ndvi FLOAT,
+  delta_ndvi FLOAT,
+  z_score FLOAT,
+  classification TEXT,
   alert_level TEXT,
-  notes TEXT,
+  cause TEXT,
+  explanation TEXT,
+  recommendation TEXT,
+  spectral_context JSONB,
+  data_quality TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

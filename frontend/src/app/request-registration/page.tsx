@@ -195,7 +195,7 @@ function RequestRegistrationContent() {
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
             Submit your land details and our research team will scan your property
-            using AI satellite analysis. You'll be notified once a verifier/analyst
+            using AI satellite analysis. You&apos;ll be notified once a verifier/analyst
             has reviewed the results.
           </p>
         </div>
