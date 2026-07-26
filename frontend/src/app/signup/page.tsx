@@ -27,10 +27,17 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [agreedToPrivacyPolicy, setAgreedToPrivacyPolicy] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!agreedToPrivacyPolicy) {
+      setError("You must agree to the Privacy Policy to create an account.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -266,9 +273,31 @@ export default function SignupPage() {
               </div>
             )}
 
+            <div className="flex items-start gap-2">
+              <input
+                id="agreed_to_privacy_policy"
+                type="checkbox"
+                required
+                checked={agreedToPrivacyPolicy}
+                onChange={(e) => setAgreedToPrivacyPolicy(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-terra-600 focus:ring-terra-500"
+              />
+              <label htmlFor="agreed_to_privacy_policy" className="text-xs text-gray-600">
+                I have read and agree to the{" "}
+                <Link
+                  href="/privacy"
+                  target="_blank"
+                  className="font-semibold text-terra-600 hover:text-terra-700 underline"
+                >
+                  Privacy Policy
+                </Link>
+                .
+              </label>
+            </div>
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !agreedToPrivacyPolicy}
               className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-gradient-to-r from-terra-600 to-terra-700 hover:from-terra-700 hover:to-terra-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-terra-500 disabled:opacity-50 transition-all"
             >
               {loading ? "Creating account..." : "Create account"}
