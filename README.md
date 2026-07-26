@@ -656,9 +656,7 @@ mission_capstone/
 │
 ├── datasets/                         # Sample datasets and GeoJSON files
 │
-├── scripts/                          # Utility scripts
-│
-└── render.yaml                       # Render.com deployment config
+└── scripts/                          # Utility scripts
 ```
 
 ---
